@@ -1,0 +1,52 @@
+
+variable          ntot  equal 8000        # total number of atoms
+variable          dl    equal 34.2        # edge length of the simulation box dl=cbrt(8000/0.2)
+variable          ti    equal 100         # thermo interval
+variable          trun  equal 8000        # total number of steps (at fix temperature)
+variable          delta equal 0.3         # maximal displacement length (do not change)
+
+variable          tmax  equal 2.0         # initial temperature
+variable          m0    equal 1.0         # initial momentum (modulus)
+
+variable          masa  equal 1.0         # mass 
+variable          d0    equal 100.0       # D
+variable          q0    equal 1.0         # coordinates scale
+variable          p0    equal 1.0         # momentum scale
+variable          rc    equal 3.162       # cutof distance for reduced coordinates
+
+# Pauli model
+#
+units             lj
+atom_style        pauli
+region            box block 0 ${dl} 0 ${dl} 0 ${dl}
+create_box        1 box
+#
+create_atoms      1 random ${ntot} 1917 box
+mass              1 ${masa}
+set type          1 dipole/random 1789 ${m0}
+#
+pair_style        pauli/cut ${rc}
+pair_coeff        1 1 ${d0} ${q0} ${p0} ${rc}
+#
+neighbor          0.2 bin
+neigh_modify      every 1 delay 0 check yes one 8000 page 80000
+
+#----------------------------------------------------
+# mux, muy, muz correspond to the momentum components 
+#----------------------------------------------------
+
+compute           1  all property/atom vx vy vz mux muy muz
+variable          tx atom c_1[1]*c_1[4]
+variable          ty atom c_1[2]*c_1[5]
+variable          tz atom c_1[3]*c_1[6]
+compute           2 all reduce ave v_tx v_ty v_tz
+variable          mytemp equal (c_2[1]+c_2[2]+c_2[3])/3.0
+#
+thermo_style      custom step v_mytemp ke epair etotal 
+thermo            ${ti}
+#
+dump myDUMP       all custom ${ti} output_rho004_pauli_initial.lammpstrj id type x y z vx vy vz fx fy fz 
+#
+fix               1 all tfmc/pauli ${delta} ${tmax} 1789 com 1 1 1
+run               ${trun} 
+
