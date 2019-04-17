@@ -1,0 +1,71 @@
+
+variable          ntot  equal 8000        # total number of atoms
+variable          dl    equal 34.2        # edge length of the simulation box dl=cbrt(8000/0.2)
+variable          ti    equal 100         # thermo interval
+variable          trun  equal 1000        # total number of steps (at fix temperature)
+variable          delta equal 0.3         # maximal displacement length (do not change)
+
+variable          tmax  equal 2.1         # initial temperature
+variable          tmin  equal 0.1         # final   temperature
+variable          m0    equal 1.0         # initial momentum (modulus)
+
+variable          masa  equal 1.0         # mass 
+variable          d0    equal 100.0       # D
+variable          q0    equal 1.0         # coordinates scale
+variable          p0    equal 1.0         # momentum scale
+variable          rc    equal 3.162       # cutof distance for reduced coordinates
+
+variable          i loop 1 ${ti}
+
+variable          dtt equal ${tmax}-${tmin}
+variable          dii equal ${dtt}/${ti}
+
+# Pauli model
+#
+units             lj
+atom_style        pauli
+region            box block 0 ${dl} 0 ${dl} 0 ${dl}
+create_box        1 box
+#
+create_atoms      1 random ${ntot} 1917 box
+mass              1 ${masa}
+set type          1 dipole/random 1789 ${m0}
+#
+pair_style        pauli/cut ${rc}
+pair_coeff        1 1 ${d0} ${q0} ${p0} ${rc}
+#
+neighbor          0.2 bin
+neigh_modify      every 1 delay 0 check yes one 8000 page 80000
+
+label             start_of_loop_i   
+
+variable          tt    equal ${i}*${trun}
+variable          ts    equal ${tt}-${trun}
+variable          tempi equal ${tmax}+${dii}-${dii}*${i}
+reset_timestep    ${ts}
+
+#----------------------------------------------------
+# mux, muy, muz correspond to the momentum components 
+#----------------------------------------------------
+
+compute           1  all property/atom vx vy vz mux muy muz
+variable          tx atom c_1[1]*c_1[4]
+variable          ty atom c_1[2]*c_1[5]
+variable          tz atom c_1[3]*c_1[6]
+compute           2 all reduce ave v_tx v_ty v_tz
+variable          mytemp equal (c_2[1]+c_2[2]+c_2[3])/3.0
+#
+thermo_style      custom step v_mytemp ke epair etotal 
+thermo            ${trun}
+#
+
+fix               1 all tfmc/pauli ${delta} ${tempi} 1789 com 1 1 1
+run               ${trun} 
+#
+write_dump        all custom output_rho2_pauli_caloric_curve.lammpstrj id type x y z vx vy vz fx fy fz mux muy muz modify append yes
+print             "${tt} ${tempi} ${mytemp} $(ke) $(epair) ${etot}" append lammps_pauli_caloric_curve.dat
+
+uncompute         1
+uncompute         2
+next              i
+jump SELF         start_of_loop_i
