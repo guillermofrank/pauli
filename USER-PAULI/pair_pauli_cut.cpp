@@ -57,12 +57,12 @@ PairPauliCut::~PairPauliCut()
 void PairPauliCut::compute(int eflag, int vflag)
 {
   int    i,j,ii,jj,inum,jnum,itype,jtype;
-  double xtmp,ytmp,ztmp,pxtmp,pytmp,pztmp,delx,dely,delz,ecoul; // Guillermo Frank: temporary mu
-  double delpx,delpy,delpz,rsq,psq,rinv,r2inv,p2inv,rcsq;       // Guillermo Frank: del mu, psq, p2inv, rcsq
-  double forcecoul,fpair,vpair,factor_coul,factor_lj;           // Guillermo Frank: fpair, vpair
+  double xtmp,ytmp,ztmp,pxtmp,pytmp,pztmp,delx,dely,delz,epauli; // Guillermo Frank: tmp mu, epauli
+  double delpx,delpy,delpz,rsq,psq,rinv,r2inv,p2inv,rcsq;        // Guillermo Frank: del mu, psq, p2inv, rcsq
+  double forcecoul,fpair,vpair,factor_coul,factor_lj;            // Guillermo Frank: fpair, vpair
   int    *ilist,*jlist,*numneigh,**firstneigh;
 
-  ecoul = 0.0;
+  epauli = 0.0;
   if (eflag || vflag) ev_setup(eflag,vflag);
   else evflag = vflag_fdotr = 0;
 
@@ -143,9 +143,11 @@ void PairPauliCut::compute(int eflag, int vflag)
           f[j][2] -= delz*fpair;
         }
 
-       ecoul = forcecoul-epsilon[itype][jtype]/exp(0.5*rcsq);
+       epauli = forcecoul-epsilon[itype][jtype]/exp(0.5*rcsq);
 
-       ev_tally(i,j,nlocal,newton_pair,0.0,ecoul,fpair,delx,dely,delz);
+       // the "0.0" corresponds to evdwl (see pair.cpp)
+
+       ev_tally(i,j,nlocal,newton_pair,0.0,epauli,fpair,delx,dely,delz);
 
       }
     }

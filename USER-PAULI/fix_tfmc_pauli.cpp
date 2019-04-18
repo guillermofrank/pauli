@@ -243,7 +243,7 @@ void FixTFMCPAULI::initial_integrate(int vflag)
             P_acc = exp(2.0*pi*gamma) * gamma_exp - gamma_expi;
             P_acc = P_acc / (gamma_exp - gamma_expi);
           } else if (pi > 0) {
-            P_acc = gamma_exp - exp(2.0*xi*gamma) * gamma_expi;
+            P_acc = gamma_exp - exp(2.0*pi*gamma) * gamma_expi;
             P_acc = P_acc / (gamma_exp - gamma_expi);
           } else {
             P_acc = 1.0;
