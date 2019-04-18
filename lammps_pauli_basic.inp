@@ -45,7 +45,7 @@ variable          mytemp equal (c_2[1]+c_2[2]+c_2[3])/3.0
 thermo_style      custom step v_mytemp ke epair etotal 
 thermo            ${ti}
 #
-dump myDUMP       all custom ${ti} output_rho004_pauli_initial.lammpstrj id type x y z vx vy vz fx fy fz 
+dump myDUMP       all custom ${ti} lammps_pauli_basic.lammpstrj id type x y z vx vy vz fx fy fz 
 #
 fix               1 all tfmc/pauli ${delta} ${tmax} 1789 com 1 1 1
 run               ${trun} 
