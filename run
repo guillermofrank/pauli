@@ -1,0 +1,7 @@
+#!/bin/bash
+
+gcc -Wall -O3 -o pandha_pauli_mc.e pandha_pauli_mc.c -lm 
+
+./pandha_pauli_mc.e -n 8000 -temp 4.1 -tend 0.1 -rho 0.05 -delx 0.2 -term 4000 -tmax 1000000 -thsamp 1000 -tsamp 10000  > pandha_pauli_mc_rho05_delx02.dat
+
+cp pandha_pauli_mc.lammpstrj pandha_pauli_mc_rho05_delx02.lammpstrj
