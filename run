@@ -2,6 +2,8 @@
 
 gcc -Wall -O3 -o pandha_pauli_mc.e pandha_pauli_mc.c -lm 
 
-./pandha_pauli_mc.e -n 8000 -temp 4.1 -tend 0.1 -rho 0.05 -delx 0.2 -term 4000 -tmax 1000000 -thsamp 1000 -tsamp 10000  > pandha_pauli_mc_rho05_delx02.dat
+./pandha_pauli_mc.e -n 8000 -temp 4.1 -tend 0.1 -rho 0.05 -delx 0.2 -delp 7.0 -term 4000 -steps 1000000 -thsamp 1000 -tsamp 10000  -tctrl 500 > pandha_pauli_mc_rho05_delx02_delp7.dat
 
-cp pandha_pauli_mc.lammpstrj pandha_pauli_mc_rho05_delx02.lammpstrj
+mv pandha_pauli_mc.lammpstrj pandha_pauli_mc_rho05_delx02_delp7.lammpstrj
+
+notify guillermo.frank@gmail.com pandha_pauli_mc.e rho05 delx 02 delp 7 pasos 1000000 terminado

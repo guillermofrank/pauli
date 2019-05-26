@@ -28,19 +28,19 @@
 #define MUA     1.6000
 #define MU0     1.5000
 
-// Pauli model (Dorso)
+// Pauli model (Maruyama)
 
-#define P0      61.969   // potential parameter (61.969)
-#define Q0      6.0      // potential parameter (6.0)
-#define D       0.0      // potential parameter (5.165)
+#define P0      120.0    // potential parameter (120)
+#define Q0      1.644    // potential parameter (1.644)
+#define D       207.0    // potential parameter (207)
 
 // initial and cut-off distances
 
 #define RI      0.001
 #define PI      0.000
 #define RCPAN   5.4      // cut-off for Pandharipande potential
-#define RCRPAU  18.0     // cut-off for Pauli potential (~3*Q0)
-#define RCPPAU  186.0    // cut-off for Pauli potential (~3*P0)
+#define RCRPAU  5.4      // cut-off for Pauli potential (~3*Q0)
+#define RCPPAU  394.0    // cut-off for Pauli potential (~3*P0)
 
 // simultation parameters
 
@@ -50,8 +50,9 @@
 #define STER    100      // pasos entre magnitudes termodinamicas
 #define TERM    100      // pasos de termalizacion
 #define TEND    0.0      // temperatura final
-#define DELTAX  0.1      // tamaño del paso para x
-#define DELTAP  0.1      // tamanño del paso para p
+#define TCTRL   0        // pasos de control de delta (0 = no controlar)
+#define DELTAX  0.2      // tamaño del paso para x
+#define DELTAP  0.2      // tamaño del paso para p
 #define NN      0        // particula a seguir (0 means 'none')
 
 double  table_np[4*PANTAB],table_nn[4*PANTAB],table_pp[4*PANTAB],table_pauli[7*PAUTAB];
@@ -67,7 +68,7 @@ int     write_data(FILE *fp,double *x,double *v,double *p,int *ptype,int atoms);
 int     trace(FILE *fp,double *x,double *p,int nn);
 
 int     buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc);
-double  computelist(double *x,double *v,double *p,double *f,double *e,int *head,int *lscl,int *ptype,int dim,int n,int nc);
+int     computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,int dim,int n,int nc);
 void    build_pandha_table(double ri,double rf,int ntable);
 void    build_pauli_table(double ri,double rf,double pi,double pf,int ntable);
 void    get_table_pandha(double *data,int *ptype,double r2,int ii,int jj,int ntable);
@@ -75,17 +76,19 @@ void    get_table_pauli(double *data,int *ptype,double r2,char flag,int ii,int j
 int     tfmc(double *x,double *v,double *p,double *f,double delta_x,double delta_p,double tset,double dim,int n);
 void    thermo(double *data,double *v,double *p,double *k,double *e,int n);
 double  normaldist();
-double  checkperformance(double *x,double delta_x,double delta_p,double temp,double tend,double dim,int tmax,int nc,int n);
+double  checkperformance1(double temp,double tend,double dim,int tmax,int nc,int n);
+int     checkperformance2(double *neighbor,double delta_x,double delta_p,double temp);
+int     controldelta(double *neighbor,double *delta);
 
 int main(int argc, char *argv[])
 {
   char    option[20],myfile[40];
-  int     i,n,nn,ndim,seed,t,term,tmax,thsamp,tsamp;
+  int     i,n,nn,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
   int     nc,*head,*lscl,*ptype;
-  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,dt;
-  double  *x,*v,*p,*f,*k,*e,*data;
+  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,pmin,dt;
+  double  *x,*v,*p,*f,*k,*e,*neighbor,*delta,*data;
   clock_t c0,c1;
-  FILE    *fp1; //*fp2;
+  FILE    *fp1;
 
   c0=clock();
   
@@ -99,6 +102,7 @@ int main(int argc, char *argv[])
   tmax = SMAX;
   tsamp = SWRT;
   thsamp = STER;
+  tctrl  = TCTRL;
   rcell= RCELL;
   xproton = XPROTON;
   delta_x = DELTAX;
@@ -129,8 +133,9 @@ int main(int argc, char *argv[])
           if (!strcmp(option,"-delx") & (i+1<argc)) sscanf(argv[i+1],"%lf",&delta_x);
           if (!strcmp(option,"-delp") & (i+1<argc)) sscanf(argv[i+1],"%lf",&delta_p);
           if (!strcmp(option,"-term") & (i+1<argc)) sscanf(argv[i+1],"%d",&term);
-          if (!strcmp(option,"-tmax") & (i+1<argc)) sscanf(argv[i+1],"%d",&tmax);
+          if (!strcmp(option,"-steps") & (i+1<argc)) sscanf(argv[i+1],"%d",&tmax);
           if (!strcmp(option,"-thsamp") & (i+1<argc)) sscanf(argv[i+1],"%d",&thsamp);
+          if (!strcmp(option,"-tctrl") & (i+1<argc)) sscanf(argv[i+1],"%d",&tctrl);
           if (!strcmp(option,"-tsamp") & (i+1<argc)) sscanf(argv[i+1],"%d",&tsamp);
           if (!strcmp(option,"-seed") & (i+1<argc)) sscanf(argv[i+1],"%d",&seed);
           if (!strcmp(option,"-initial") & (i+1<argc)) strcpy(myfile,argv[i+1]);
@@ -151,6 +156,8 @@ int main(int argc, char *argv[])
 
           ptype = (int *)malloc(n*sizeof(int));
           data = (double *)malloc(10*sizeof(double));
+          delta = (double *)malloc(2*sizeof(double));
+          neighbor = (double *)malloc(2*sizeof(double));
 
           k = (double *)malloc(n*sizeof(double));
           e = (double *)malloc(n*sizeof(double));
@@ -170,6 +177,8 @@ int main(int argc, char *argv[])
 
       ptype = (int *)malloc(n*sizeof(int));
       data = (double *)malloc(10*sizeof(double));  // 10 thermodynamical magnitudes (can be upscaled)
+      delta = (double *)malloc(2*sizeof(double));
+      neighbor = (double *)malloc(2*sizeof(double));
 
       k = (double *)malloc(n*sizeof(double));
       e = (double *)malloc(n*sizeof(double));
@@ -185,7 +194,7 @@ int main(int argc, char *argv[])
 
   if (!(nc=(int)floor(dim/RCELL))) nc++;
 
-  rcell=checkperformance(x,delta_x,delta_p,temp,tend,dim,tmax,nc,n);
+  rcell=checkperformance1(temp,tend,dim,tmax,nc,n);
 
   head = (int *)malloc(nc*nc*nc*sizeof(int));
   lscl = (int *)malloc(n*sizeof(int));
@@ -198,22 +207,27 @@ int main(int argc, char *argv[])
 
   printf("building tables\t\t\t[OK]\n");
 
-  dmin = computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
+  tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
+  computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
+  buildlist(x,head,lscl,rcell,n,nc);
 
-  printf("inicializing\t\t\t[OK]\n\n");
-  printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total \tdelx/dmin\n\n");
-
-  fp1=fopen("pandha_pauli_mc.lammpstrj","w");
-
+  checkperformance2(neighbor,delta_x,delta_p,temp);
+ 
   t=0;
 
   while (t<term)
     {
       tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-      dmin = computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
+      computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
       buildlist(x,head,lscl,rcell,n,nc);
       t++;
     }
+
+  printf("thermalisation\t\t\t[OK]\n\n");
+
+  if(tsamp>0) fp1=fopen("pandha_pauli_mc.lammpstrj","w");
+
+  printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total \tdelx/dmin \tdelp/pmin\n\n");
 
   t=0;
   dt = (temp-tend)/(double)(tmax);
@@ -221,7 +235,7 @@ int main(int argc, char *argv[])
   while (t<tmax)
     {
       tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-      dmin = computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
+      computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
       buildlist(x,head,lscl,rcell,n,nc);
       thermo(data,v,p,k,e,n);
 
@@ -229,29 +243,36 @@ int main(int argc, char *argv[])
       ekin  = *(data+1);
       epair = *(data+2);
       etot  = *(data+3);
+      dmin  = *(neighbor+0);
+      pmin  = *(neighbor+1);
 
-      if(t%thsamp==0) printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,etot,delta_x/dmin);
+      if(thsamp>0 && t%thsamp==0) 
+        printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,etot,delta_x/dmin,delta_p/pmin);
 
-      if(t%tsamp==0)
+      if(tsamp>0 && t%tsamp==0)
         {
           write_header(fp1,dim,n,t);
           write_data(fp1,x,v,p,ptype,n);
-          //if (nn) trace(fp2,x,p,nn);
+        }
+
+      if (tctrl>0 && t%tctrl==0) 
+        {
+          *(delta+0) = delta_x;
+          *(delta+1) = delta_p;
+          controldelta(neighbor,delta);
+          delta_x = *(delta+0);
+          delta_p = *(delta+1);
         }
 
       t++;
       temp -= dt;
     }
 
-  fclose(fp1);
+  if(tsamp>0) fclose(fp1);
   
-  /*
-  if (nn) fp2=fopen("trace.dat","w");
-  if (nn) fclose(fp2);
-  */
-
   free(data);
   free(ptype);
+  free(neighbor);
 
   free(k);
   free(e);
@@ -371,46 +392,14 @@ double inicial(double *x,double *v,double *p,double *f,int *ptype,double rho,dou
   return dim;
 }
 
-double checkperformance(double *x,double delta_x,double delta_p,double temp,double tend,double dim,int tmax,int nc,int n)
+double checkperformance1(double temp,double tend,double dim,int tmax,int nc,int n)
 {
-  int i,j,ncells;
-  double dx,dy,dz,dd,dmin,dmin2,mytime,rcell;
+  int    ncells;
+  double rcell;
 
   printf("\ninitial temp. = %f\n",temp);
   printf("final   temp. = %f\n",tend);
   printf("inc/dec temp. = %g\n",(temp-tend)/(double)tmax);
-
-  dmin  =0.0;
-
-  for(i=0;i<n-1;i++)
-    {
-      dmin2 = dim*dim;
-
-      for(j=i+1;j<n;j++)
-        {
-          dx = (*(x+3*i+0)) - (*(x+3*j+0));
-          dy = (*(x+3*i+1)) - (*(x+3*j+1));
-          dz = (*(x+3*i+2)) - (*(x+3*j+2));
-
-          dd = dx*dx+dy*dy+dz*dz;
-
-          if (dd<dmin2) dmin2 = dd;
-        }
-
-      dmin += sqrt(dmin2)/(double)n;
-    }
-
-  mytime = delta_x*sqrt(1.570796327*M/temp)/3.0;
-
-  printf("\ndelta (x) = %f\t\t",delta_x);
-  if (mytime<1.0) printf("[warning: timestep ~ %f . I suggest to increase delta (x)]\n",mytime);
-  else printf("[timestep ~ %f]\n",mytime);
-
-  printf("delta (p) = %f\n",delta_p);
-
-  printf("min. distance = %f\t",dmin);
-  if (delta_x>0.1*dmin) printf("[warning: delta (x) 0.1 exceeds atoms distance. I suggest to decrease delta (x)]\n");
-  else printf("[ratio delta/dmin ~ %f]\n",delta_x/dmin);
 
   ncells = nc*nc*nc;
   rcell  = dim/(double)nc;
@@ -427,6 +416,55 @@ double checkperformance(double *x,double delta_x,double delta_p,double temp,doub
   else printf("\n"); 
 
   return rcell;
+}
+
+
+int checkperformance2(double *neighbor,double delta_x,double delta_p,double temp)
+{
+  double dmin,dpmin,mytime;
+ 
+  dmin  = *(neighbor+0);
+  dpmin = *(neighbor+1);
+
+  mytime = delta_x*sqrt(1.570796327*M/temp)/3.0;
+
+  printf("\ndelta (x) = %f\t\t",delta_x);
+  if (mytime<1.0) printf("[warning: <t> ~ %f . I suggest to increase delta (x)]\n",mytime);
+  else printf("[<t> ~ %f]\n",mytime);
+
+  printf("delta (p) = %f\n",delta_p);
+
+  printf("neigh. distance = %f\t",dmin);
+  if (delta_x>0.1*dmin) printf("[warning: delta (x) exceeds 0.1 neighbor distance. I suggest to decrease delta (x)]\n");
+  else printf("[ratio delta_x/dmin ~ %f]\n",delta_x/dmin);
+
+  printf("neigh. momentum = %f\t",dpmin);
+  if (delta_p>0.1*dpmin) printf("[warning: delta (p) exceeds 0.1 neighbor distance. I suggest to decrease delta (p)]\n\n");
+  else printf("[ratio delta_p/dpmin ~ %f]\n\n",delta_p/dpmin);
+
+  return 1;
+}
+
+
+int controldelta(double *neighbor,double *delta)
+{
+  double dmin,dpmin,rx,rp,delta_x,delta_p;
+ 
+  dmin  = *(neighbor+0);
+  dpmin = *(neighbor+1);
+  delta_x = *(delta+0);
+  delta_p = *(delta+1);
+
+  rx = delta_x/dmin;
+  rp = delta_p/dpmin;
+
+  if ((rx<0.05) || (rx>0.1)) delta_x = 0.075*dmin;
+  if ((rp<0.05) || (rp>0.1)) delta_p = 0.075*dpmin;
+
+  *(delta+0) = delta_x;
+  *(delta+1) = delta_p;
+
+  return 1;
 }
 
 
@@ -452,15 +490,17 @@ int buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc)
   return 1;
 }
 
-double computelist(double *x,double *v,double *p,double *f,double *e,int *head,int *lscl,int *ptype,int dim,int n,int nc)
+int computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,int dim,int n,int nc)
 {
-  int    h,i,j,c,cx,cy,cz,cc,ccx,ccy,ccz;
-  double dx,dy,dz,dpx,dpy,dpz,r,pr,r2,p2,dij,dmin;
+  int    h,i,j,k,c,cx,cy,cz,cc,ccx,ccy,ccz;
+  double dx,dy,dz,dpx,dpy,dpz,r,pr,r2,p2,dij,dmin,pij,pmin;
   double fx,fy,fz,fr,vx,vy,vz,vr,ep;
   double shift[3],ref[3];
 
   h = 0;
+  k = 0;
   dmin = 0.0;
+  pmin = 0.0;
 
   for (i=0; i<n; i++) 
     {
@@ -468,6 +508,9 @@ double computelist(double *x,double *v,double *p,double *f,double *e,int *head,i
       *(f+3*i+0) = 0.0;
       *(f+3*i+1) = 0.0;
       *(f+3*i+2) = 0.0;
+      *(v+3*i+0) = 0.0;
+      *(v+3*i+1) = 0.0;
+      *(v+3*i+2) = 0.0;
     }
 
   for (cx=0; cx<nc; cx++)                                  // scan inner cells 
@@ -503,6 +546,7 @@ double computelist(double *x,double *v,double *p,double *f,double *e,int *head,i
                     {
                       j   = head[cc];                      // scan atom j in cell cc
                       dij = dim;
+                      pij = 100.0*P0;
                       while (j != EMPTY) 
                         {
                           if (i < j)                       // avoid double counting and correct image positions 
@@ -529,7 +573,7 @@ double computelist(double *x,double *v,double *p,double *f,double *e,int *head,i
                                   fy = dy*fr/r;
                                   fz = dz*fr/r;
 
-                                  *(e+i) += ep/(double)n;     // printf("fx= %f\tfy= %f\t fz=%f\n",fx,fy,fz);
+                                  *(e+i) += ep/(double)n;     
                                   *(f+3*i+0) += fx;
                                   *(f+3*i+1) += fy;
                                   *(f+3*i+2) += fz;
@@ -579,6 +623,8 @@ double computelist(double *x,double *v,double *p,double *f,double *e,int *head,i
                                   *(v+3*j+0) -= D*vx;
                                   *(v+3*j+1) -= D*vy;
                                   *(v+3*j+2) -= D*vz; 
+
+                                  if (pr<pij) pij = pr;
                                 }
                             }
                           j = lscl[j];
@@ -588,14 +634,22 @@ double computelist(double *x,double *v,double *p,double *f,double *e,int *head,i
 
                       if (dij<dim)        // compute typical nearest neighbor distance
                         {
-                          dmin += dij;
+                          dmin += dij; 
                           h++;
+                        }
+                      if (pij<100.0*P0)   // compute typical nearest neighbor momentum
+                        {
+                          pmin += pij;
+                          k++;
                         }
                     }
                 }
       }
 
-  return dmin/(double)h;
+  *(neighbor+0) = dmin/(double)h;
+  *(neighbor+1) = pmin/(double)k;
+
+  return 1;
 }
 
 
@@ -674,7 +728,7 @@ int tfmc(double *x,double *v,double *p,double *f,double delta_x,double delta_p,d
 
           if (!isnan(p_acc)) 
             {
-              *(p+3*i+j) += pi*delta_p;       // displace momenta
+             *(p+3*i+j) += pi*delta_p;       // displace momenta
             }
         }
     }
@@ -784,7 +838,7 @@ void get_table_pauli(double *data,int *ptype,double r2,char flag,int ii,int jj,i
   if (itype==jtype)  
     {
 
-      // recall the format "r,p,r2,p2,vr,vp,fr,fp"
+      // recall the format "r,p,r2,p2,v,fr,fp"
       // warning: D is consirered  to be unity here!!!
 
       if (flag=='x')
@@ -954,12 +1008,14 @@ double read_data(char *myfile,double *x,double *v,double *p,int *ptype,int atoms
      j=fscanf(fp,"%f %f %f",&vx,&vy,&vz);
      j=fscanf(fp,"%f %f %f\n",&px,&py,&pz);
 
-     id--;
-     vpx=(double)vx*(double)px;
-     vpy=(double)vy*(double)py;
-     vpz=(double)vz*(double)pz;
+     // warning: v + p/M is the true velocity!!!
+     
+     vpx=((double)vx+(double)px/M)*(double)px;
+     vpy=((double)vy+(double)py/M)*(double)py;
+     vpz=((double)vz+(double)pz/M)*(double)pz;
      ec+=(vpx+vpy+vpz);
 
+    id--;
     *(ptype+id)=tid;
 
     *(x+3*id+0)=(double)rx;
@@ -1106,12 +1162,12 @@ void build_pauli_table(double ri,double rf,double pi,double pf,int ntable)
       p2 = p*p;
 
       r2q2=0.5*(r2)/q02;
-      p2p2=0.5*(r2)/p02;
+      p2p2=0.5*(p2)/p02;
 
-      expr2 = exp(-r2q2);
-      expp2 = exp(-p2p2);
+      expr2 = 1.0/exp(r2q2);
+      expp2 = 1.0/exp(p2p2);
 
-      // store as "r,p,r2,p2,vr,vp,fr,fp" (extra columns with respect to Lammps format)
+      // store as "r,p,r2,p2,v,fr,fp" (extra columns with respect to Lammps format)
       // warning: D is consirered  to be unity here!!!
     
       *(table_pauli+7*i+0) = r;
@@ -1119,8 +1175,8 @@ void build_pauli_table(double ri,double rf,double pi,double pf,int ntable)
       *(table_pauli+7*i+2) = r2;
       *(table_pauli+7*i+3) = p2;
       *(table_pauli+7*i+4) = expr2*expp2-exprcr*exprcp;
-      *(table_pauli+7*i+5) =  (r/q02)*expr2*expp2;
-      *(table_pauli+7*i+6) = -(p/p02)*expr2*expp2;
+      *(table_pauli+7*i+5) =  0.5*(r/q02)*expr2*expp2;
+      *(table_pauli+7*i+6) =  0.5*(p/p02)*expr2*expp2;
     }
 
   return;
@@ -1148,17 +1204,18 @@ double normaldist()
 void help()
 {
   printf("\nThis is a MD simulation program for the Pauli potential.\n\n");
-  printf("-n       number of particles (default 8000)\n");
-  printf("-x       proton fraction (default 0.5)\n");
-  printf("-rho     density (default 0.16)\n");
-  printf("-temp    temperature (default 0.1)\n");
-  printf("-tend    ending temperature (same as temp)\n");
-  printf("-delx    monte carlo trial on x (coordinates; default 0.1)\n");
-  printf("-delp    monte carlo trial on p (momenta; default 0.1)\n");
-  printf("-term    termalizacion steps (default 100)\n");
-  printf("-tmax    monte carlo steps (default 100)\n");
-  printf("-thsamp  sampling period for thermodynamics (default 100)\n");
-  printf("-tsamp   sampling period for configurations (default 100)\n");
+  printf("-n       number of particles                (default 8000)\n");
+  printf("-x       proton fraction                    (default 0.5)\n");
+  printf("-rho     density                            (default 0.16)\n");
+  printf("-temp    initial temperature                (default 0.1)\n");
+  printf("-tend    ending temperature                 (default temp)\n");
+  printf("-delx    monte carlo trial on coordinates x (default 0.2)\n");
+  printf("-delp    monte carlo trial on momenta p     (default 0.2)\n");
+  printf("-term    termalizacion steps                (default 100)\n");
+  printf("-steps    monte carlo steps                 (default 100)\n");
+  printf("-thsamp  sampling period for thermodynamics (default 100; 0 = no sampling)\n");
+  printf("-tctrl   control period for delta           (default 0 = no control)\n");
+  printf("-tsamp   sampling period for configurations (default 100; 0 = no sampling)\n");
   printf("-seed    initial value for rand.\n");
   printf("-initial initial configuration (lammps format).\n");
   //printf("-trace   atom to follow (gets the position and momentum).\n");
