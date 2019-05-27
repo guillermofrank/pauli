@@ -50,10 +50,13 @@
 #define STER    100      // pasos entre magnitudes termodinamicas
 #define TERM    100      // pasos de termalizacion
 #define TEND    0.0      // temperatura final
+#define TOLT    0.1      // tolerancia de temp para termalizar
 #define TCTRL   0        // pasos de control de delta (0 = no controlar)
 #define DELTAX  0.2      // tamaño del paso para x
 #define DELTAP  0.2      // tamaño del paso para p
-#define NN      0        // particula a seguir (0 means 'none')
+#define DELTAM  0.001    // tamaño de paso minimo
+#define TOL     0.75     // tolerancia para la fraccion de delta_x y delta_p 
+#define RATIO   0.1      // fraccion de delta_x y delta_p 
 
 double  table_np[4*PANTAB],table_nn[4*PANTAB],table_pp[4*PANTAB],table_pauli[7*PAUTAB];
 
@@ -62,10 +65,9 @@ double  randnum(int *semilla);
 double  inicial(double *x,double *v,double *p,double *f,int *ptype,double rho,double temp,double xproton,int ndim);
 int     read_atoms(char *myfile);
 int     read_dim(char *myfile);
-double  read_data(char *myfile,double *x,double *v,double *p,int *ptype,int atoms);
+double  read_data(char *myfile,double *x,double *v,double *p,double *f,int *ptype,int atoms);
 int     write_header(FILE *fp,double dim,int atoms,int timestep);
-int     write_data(FILE *fp,double *x,double *v,double *p,int *ptype,int atoms);
-int     trace(FILE *fp,double *x,double *p,int nn);
+int     write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms);
 
 int     buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc);
 int     computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,int dim,int n,int nc);
@@ -78,22 +80,21 @@ void    thermo(double *data,double *v,double *p,double *k,double *e,int n);
 double  normaldist();
 double  checkperformance1(double temp,double tend,double dim,int tmax,int nc,int n);
 int     checkperformance2(double *neighbor,double delta_x,double delta_p,double temp);
-int     controldelta(double *neighbor,double *delta);
+double  controldelta(double *neighbor,double delta,double ratio);
 
 int main(int argc, char *argv[])
 {
   char    option[20],myfile[40];
-  int     i,n,nn,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
+  int     i,n,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
   int     nc,*head,*lscl,*ptype;
-  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,pmin,dt;
-  double  *x,*v,*p,*f,*k,*e,*neighbor,*delta,*data;
+  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,pmin,dt,ratio;
+  double  *x,*v,*p,*f,*k,*e,*neighbor,*data;
   clock_t c0,c1;
   FILE    *fp1;
 
   c0=clock();
   
   n = N;
-  nn = NN;
   rho = RHO;
   temp = TEMP;
   tend = TEND;
@@ -105,6 +106,7 @@ int main(int argc, char *argv[])
   tctrl  = TCTRL;
   rcell= RCELL;
   xproton = XPROTON;
+  ratio = RATIO;
   delta_x = DELTAX;
   delta_p = DELTAP;
   myfile[0]='\0';
@@ -136,10 +138,10 @@ int main(int argc, char *argv[])
           if (!strcmp(option,"-steps") & (i+1<argc)) sscanf(argv[i+1],"%d",&tmax);
           if (!strcmp(option,"-thsamp") & (i+1<argc)) sscanf(argv[i+1],"%d",&thsamp);
           if (!strcmp(option,"-tctrl") & (i+1<argc)) sscanf(argv[i+1],"%d",&tctrl);
+          if (!strcmp(option,"-ctrl") & (i+1<argc)) sscanf(argv[i+1],"%lf",&ratio);
           if (!strcmp(option,"-tsamp") & (i+1<argc)) sscanf(argv[i+1],"%d",&tsamp);
           if (!strcmp(option,"-seed") & (i+1<argc)) sscanf(argv[i+1],"%d",&seed);
           if (!strcmp(option,"-initial") & (i+1<argc)) strcpy(myfile,argv[i+1]);
-          if (!strcmp(option,"-trace") & (i+1<argc)) sscanf(argv[i+1],"%d",&nn);
         }
     }
 
@@ -156,7 +158,6 @@ int main(int argc, char *argv[])
 
           ptype = (int *)malloc(n*sizeof(int));
           data = (double *)malloc(10*sizeof(double));
-          delta = (double *)malloc(2*sizeof(double));
           neighbor = (double *)malloc(2*sizeof(double));
 
           k = (double *)malloc(n*sizeof(double));
@@ -166,7 +167,10 @@ int main(int argc, char *argv[])
           p = (double *)malloc(3*n*sizeof(double));
           f = (double *)malloc(3*n*sizeof(double));
 
-          teff = read_data(myfile,x,v,p,ptype,n);
+          teff = read_data(myfile,x,v,p,f,ptype,n);
+          term = 0;
+          delta_x = DELTAM;
+          delta_p = DELTAM;
         }
       else exit(0);
     }
@@ -177,7 +181,6 @@ int main(int argc, char *argv[])
 
       ptype = (int *)malloc(n*sizeof(int));
       data = (double *)malloc(10*sizeof(double));  // 10 thermodynamical magnitudes (can be upscaled)
-      delta = (double *)malloc(2*sizeof(double));
       neighbor = (double *)malloc(2*sizeof(double));
 
       k = (double *)malloc(n*sizeof(double));
@@ -213,17 +216,52 @@ int main(int argc, char *argv[])
 
   checkperformance2(neighbor,delta_x,delta_p,temp);
  
-  t=0;
-
-  while (t<term)
+  if (term)
     {
-      tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-      computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
-      buildlist(x,head,lscl,rcell,n,nc);
-      t++;
+      t=0;
+
+      while (t<term)
+        {
+          tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
+          computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
+          buildlist(x,head,lscl,rcell,n,nc);
+          t++;
+        }
+
+      delta_x=controldelta(neighbor+0,delta_x,ratio);
+      delta_p=controldelta(neighbor+1,delta_p,ratio); 
+      thermo(data,v,p,k,e,n);
+      teff  = *(data+0);
+
+      if (fabs(temp-teff)>TOLT) printf("thermalisation\t\t\t[not completely thermalized. Reducing step...]\n");
+      else printf("thermalisation\t\t\t[OK]\n");
+
+      t=0;
+
+      while (fabs(temp-teff)>TOLT && t<term)
+        {
+          tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
+          computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
+          buildlist(x,head,lscl,rcell,n,nc);
+          thermo(data,v,p,k,e,n);
+
+          teff  = *(data+0);
+          ekin  = *(data+1);
+          epair = *(data+2);
+          etot  = *(data+3);
+          dmin  = *(neighbor+0);
+          pmin  = *(neighbor+1);
+
+          t++;
+        }
+
+
+      if (fabs(temp-teff)>TOLT) printf("\t\t\t\t[temperature out of bound. I suggest to increase 'term']\n\n");
+      else printf("\t\t\t\t[done]\n\n");
     }
 
-  printf("thermalisation\t\t\t[OK]\n\n");
+  delta_x=controldelta(neighbor+0,delta_x,ratio);
+  delta_p=controldelta(neighbor+1,delta_p,ratio); 
 
   if(tsamp>0) fp1=fopen("pandha_pauli_mc.lammpstrj","w");
 
@@ -252,16 +290,13 @@ int main(int argc, char *argv[])
       if(tsamp>0 && t%tsamp==0)
         {
           write_header(fp1,dim,n,t);
-          write_data(fp1,x,v,p,ptype,n);
+          write_data(fp1,x,v,p,f,ptype,n);
         }
 
       if (tctrl>0 && t%tctrl==0) 
         {
-          *(delta+0) = delta_x;
-          *(delta+1) = delta_p;
-          controldelta(neighbor,delta);
-          delta_x = *(delta+0);
-          delta_p = *(delta+1);
+          delta_x=controldelta(neighbor+0,delta_x,ratio);
+          delta_p=controldelta(neighbor+1,delta_p,ratio);
         }
 
       t++;
@@ -446,25 +481,16 @@ int checkperformance2(double *neighbor,double delta_x,double delta_p,double temp
 }
 
 
-int controldelta(double *neighbor,double *delta)
+double controldelta(double *neighbor,double delta,double ratio)
 {
-  double dmin,dpmin,rx,rp,delta_x,delta_p;
+  double dist,r;
  
-  dmin  = *(neighbor+0);
-  dpmin = *(neighbor+1);
-  delta_x = *(delta+0);
-  delta_p = *(delta+1);
+  dist  = *neighbor;
+  r = delta/dist;
 
-  rx = delta_x/dmin;
-  rp = delta_p/dpmin;
+  if ((r<TOL*ratio) || (r>ratio/TOL)) delta = ratio*dist;
 
-  if ((rx<0.05) || (rx>0.1)) delta_x = 0.075*dmin;
-  if ((rp<0.05) || (rp>0.1)) delta_p = 0.075*dpmin;
-
-  *(delta+0) = delta_x;
-  *(delta+1) = delta_p;
-
-  return 1;
+  return delta;
 }
 
 
@@ -916,6 +942,8 @@ int read_atoms(char *myfile)
   j=fscanf(fp,"%f %f\n",lim+4,lim+5);
   j=fscanf(fp,"%s %s %s %s",trash1,trash2,trash3,trash4);
   j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
+  j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
+  j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
   j=fscanf(fp,"%s %s %s\n",trash1,trash2,trash3);
   
   fclose(fp);
@@ -952,6 +980,7 @@ int read_dim(char *myfile)
   j=fscanf(fp,"%s %s %s %s",trash1,trash2,trash3,trash4);
   j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
   j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
+  j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
   j=fscanf(fp,"%s %s %s\n",trash1,trash2,trash3);
 
   dim=lim[1];  
@@ -974,11 +1003,11 @@ int read_dim(char *myfile)
 }
 
 
-double read_data(char *myfile,double *x,double *v,double *p,int *ptype,int atoms)
+double read_data(char *myfile,double *x,double *v,double *p,double *f,int *ptype,int atoms)
 {
   int i,j,id,tid;
   char trash1[40],trash2[40],trash3[40],trash4[40];
-  float rx,ry,rz,vx,vy,vz,px,py,pz;
+  float rx,ry,rz,vx,vy,vz,px,py,pz,fx,fy,fz;
   double ec,t,vpx,vpy,vpz;
   FILE *fp;
 
@@ -996,6 +1025,7 @@ double read_data(char *myfile,double *x,double *v,double *p,int *ptype,int atoms
   j=fscanf(fp,"%s %s %s %s",trash1,trash2,trash3,trash4);
   j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
   j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
+  j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
   j=fscanf(fp,"%s %s %s\n",trash1,trash2,trash3);
 
   ec=0.0;
@@ -1006,7 +1036,8 @@ double read_data(char *myfile,double *x,double *v,double *p,int *ptype,int atoms
      j=fscanf(fp,"%d",&tid);
      j=fscanf(fp,"%f %f %f",&rx,&ry,&rz);
      j=fscanf(fp,"%f %f %f",&vx,&vy,&vz);
-     j=fscanf(fp,"%f %f %f\n",&px,&py,&pz);
+     j=fscanf(fp,"%f %f %f",&px,&py,&pz);
+     j=fscanf(fp,"%f %f %f\n",&fx,&fy,&fz);
 
      // warning: v + p/M is the true velocity!!!
      
@@ -1029,6 +1060,10 @@ double read_data(char *myfile,double *x,double *v,double *p,int *ptype,int atoms
     *(p+3*id+0)=(double)px;
     *(p+3*id+1)=(double)py;
     *(p+3*id+2)=(double)pz;
+
+    *(f+3*id+0)=(double)fx;
+    *(f+3*id+1)=(double)fy;
+    *(f+3*id+2)=(double)fz;
    }
 
    t=ec/(3.0*(double)atoms);
@@ -1050,11 +1085,11 @@ int write_header(FILE *fp,double dim,int atoms,int timestep)
   fprintf(fp,"%f %f\n",0.0,dim);
   fprintf(fp,"%f %f\n",0.0,dim);
   fprintf(fp,"%f %f\n",0.0,dim);
-  fprintf(fp,"ITEM: ATOMS id type x y z vx vy vz px py pz\n");
+  fprintf(fp,"ITEM: ATOMS id type x y z vx vy vz px py pz fx fy fz\n");
   return 1;
 }
 
-int write_data(FILE *fp,double *x,double *v,double *p,int *ptype,int atoms)
+int write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms)
 {
   int i;
 
@@ -1064,24 +1099,12 @@ int write_data(FILE *fp,double *x,double *v,double *p,int *ptype,int atoms)
       fprintf(fp," %f %f %f",*(x+3*i+0),*(x+3*i+1),*(x+3*i+2));
       fprintf(fp," %f %f %f",*(v+3*i+0),*(v+3*i+1),*(v+3*i+2));
       fprintf(fp," %f %f %f",*(p+3*i+0),*(p+3*i+1),*(p+3*i+2));
+      fprintf(fp," %f %f %f",*(f+3*i+0),*(f+3*i+1),*(f+3*i+2));
       fprintf(fp,"\n");
     }
 
   return 1;
 }
-
-int trace(FILE *fp,double *x,double *p,int nn)
-{
-  int i;
-
-  i=nn-1;
-  fprintf(fp," %f %f %f",*(x+3*nn+0),*(x+3*nn+1),*(x+3*nn+2));
-  fprintf(fp," %f %f %f",*(p+3*i+0),*(p+3*i+1),*(p+3*i+2));
-  fprintf(fp,"\n");
-
-  return 1;
-}
-
 
 void build_pandha_table(double ri,double rf,int ntable)
 {
@@ -1213,12 +1236,12 @@ void help()
   printf("-delp    monte carlo trial on momenta p     (default 0.2)\n");
   printf("-term    termalizacion steps                (default 100)\n");
   printf("-steps    monte carlo steps                 (default 100)\n");
-  printf("-thsamp  sampling period for thermodynamics (default 100; 0 = no sampling)\n");
+  printf("-ctrl    ratio for delx and delp            (default 0.1)\n");
   printf("-tctrl   control period for delta           (default 0 = no control)\n");
+  printf("-thsamp  sampling period for thermodynamics (default 100; 0 = no sampling)\n");
   printf("-tsamp   sampling period for configurations (default 100; 0 = no sampling)\n");
   printf("-seed    initial value for rand.\n");
   printf("-initial initial configuration (lammps format).\n");
-  //printf("-trace   atom to follow (gets the position and momentum).\n");
   printf("\n");
   exit(0);
 }
