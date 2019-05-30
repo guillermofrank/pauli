@@ -11,10 +11,6 @@
 #define RHO       0.16     // densidad media en la celda (0.05)
 #define TEMP      0.1      // temperatura inicial del sistema (4.0)
 #define XPROTON   0.5      // fraction of protons (protons/total)
-#define NEUTRONUP 1        // tipo de particula (neutron up)   (para graficar con VND)
-#define PROTONUP  2        // tipo de particula (proton up)    (para graficar con VND)
-#define NEUTRONDN 1        // tipo de particula (neutron down) (para graficar con VND)
-#define PROTONDN  2        // tipo de particula (proton down)  (para graficar con VND)
 
 #define EMPTY     -1       // empty value -1 (no not change)
 #define RCELL     5.5      // lado de las celdas cubicas (para listas de celdas ~18.5)
