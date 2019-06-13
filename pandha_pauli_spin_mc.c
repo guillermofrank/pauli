@@ -62,7 +62,7 @@ void    help();
 double  randnum(int *semilla);
 double  inicial(double *x,double *v,double *p,double *f,int *ptype,double rho,double temp,double xproton,int ndim);
 int     read_atoms(char *myfile);
-int     read_dim(char *myfile);
+double  read_dim(char *myfile);
 double  read_data(char *myfile,double *x,double *v,double *p,double *f,int *ptype,int atoms);
 int     write_header(FILE *fp,double dim,int atoms,int timestep);
 int     write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms);
@@ -972,7 +972,7 @@ int read_atoms(char *myfile)
   return atoms;
 }
 
-int read_dim(char *myfile)
+double read_dim(char *myfile)
 {
   int  j,atoms,dim,timestep;
   char trash1[40],trash2[40],trash3[40],trash4[40];
@@ -996,15 +996,15 @@ int read_dim(char *myfile)
   j=fscanf(fp,"%s %s %s",trash1,trash2,trash3);
   j=fscanf(fp,"%s %s %s\n",trash1,trash2,trash3);
 
-  dim=lim[1];  
+  dim=(double)lim[1];  
 
-  if (*(lim+0)) dim=0;
-  if (*(lim+2)) dim=0;
-  if (*(lim+4)) dim=0;
+  if (*(lim+0)) dim=0.0;
+  if (*(lim+2)) dim=0.0;
+  if (*(lim+4)) dim=0.0;
 
-  if (*(lim+1)!=(*(lim+3))) dim=0;
-  if (*(lim+1)!=(*(lim+5))) dim=0;
-  if (*(lim+3)!=(*(lim+5))) dim=0;
+  if (*(lim+1)!=(*(lim+3))) dim=0.0;
+  if (*(lim+1)!=(*(lim+5))) dim=0.0;
+  if (*(lim+3)!=(*(lim+5))) dim=0.0;
 
   if(!dim) printf("\nSomething is wrong with the cell dimensions!\n\n");
   
