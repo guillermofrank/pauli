@@ -1211,8 +1211,8 @@ void build_pauli_table(double ri,double rf,double pi,double pf,int ntable)
       *(table_pauli+7*i+2) = r2;
       *(table_pauli+7*i+3) = p2;
       *(table_pauli+7*i+4) = expr2*expp2-exprcr*exprcp;
-      *(table_pauli+7*i+5) =  0.5*(r/q02)*expr2*expp2;
-      *(table_pauli+7*i+6) =  0.5*(p/p02)*expr2*expp2;
+      *(table_pauli+7*i+5) = (r/q02)*expr2*expp2;
+      *(table_pauli+7*i+6) = (p/p02)*expr2*expp2;
     }
 
   return;
