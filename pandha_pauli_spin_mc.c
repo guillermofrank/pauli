@@ -623,7 +623,7 @@ int computelist(double *x,double *v,double *p,double *f,double *e,double *neighb
                                   if (r<dij) dij = r;
                                 }
                               
-                              get_table_pauli(ref,ptype,r2,'x',i,j,PAUTAB);
+                              get_table_pauli(ref,ptype,r2,p2,'x',i,j,PAUTAB);
                                  
                               r  = *(ref+0);
                               ep = *(ref+1);
@@ -644,7 +644,7 @@ int computelist(double *x,double *v,double *p,double *f,double *e,double *neighb
                                   *(f+3*j+2) -= D*fz;
                                 }
 
-                              get_table_pauli(ref,ptype,p2,'p',i,j,PAUTAB);
+                              get_table_pauli(ref,ptype,r2,p2,'p',i,j,PAUTAB);
 
                               pr = *(ref+0);
                               ep = *(ref+1);
@@ -860,12 +860,12 @@ void get_table_pandha(double *data,int *ptype,double r2,int ii,int jj,int ntable
   return;
 }
 
-void get_table_pauli(double *data,int *ptype,double r2,char flag,int ii,int jj,int ntable)
+void get_table_pauli(double *data,int *ptype,double r2,double p2,char flag,int ii,int jj,int ntable)
 {
-  int    i,itype,jtype;
+  int    i,j,itype,jtype;
   double dr,r,rmin,rmax;
   double dp,p,pmin,pmax;
-  double frac,f1,f2,e1,e2;
+  double fracx,fracp,f1,f2,fr,fp,er,ep,ecut;
 
   *(data+0) = 0.0;
   *(data+1) = 0.0;
@@ -879,53 +879,53 @@ void get_table_pauli(double *data,int *ptype,double r2,char flag,int ii,int jj,i
 
       // recall the format "r,p,r2,p2,v,fr,fp"
       // warning: D is consirered  to be unity here!!!
+    
+      rmin = *(table_pauli+0);
+      rmax = *(table_pauli+7*(ntable-1)+0);
 
-      if (flag=='x')
+      r  = sqrt(r2);
+      dr = (rmax-rmin)/(double)(ntable-1);
+    
+      pmin = *(table_pauli+1);
+      pmax = *(table_pauli+7*(ntable-1)+1);
+
+      p  = sqrt(p2);
+      dp = (pmax-pmin)/(double)(ntable-1);
+    
+      if ((r<rmax) && (p<pmax))
         {
-          rmin = *(table_pauli+0);
-          rmax = *(table_pauli+7*(ntable-1)+0);
-
-          r  = sqrt(r2);
-          dr = (rmax-rmin)/(double)(ntable-1);
- 
-          if (r<rmax) 
+          i = (int)((r-rmin)/dr);
+          j = (int)((p-pmin)/dp);
+          
+          fracx = (r-(*(table_pauli+7*i+0)))/dr;
+          fracp = (p-(*(table_pauli+7*j+1)))/dp;
+        
+          f1 = *(table_pauli+7*i+4); 
+          f2 = *(table_pauli+7*(i+1)+4); 
+          er = f1*(1.0-fracx)+f2*fracx;
+          fr = f1*(1.0-fracx)+f2*fracx;
+        
+          f1 = *(table_pauli+7*j+5); 
+          f2 = *(table_pauli+7*(j+1)+5);
+          ep = f1*(1.0-fracp)+f2*fracp;
+          fp = f1*(1.0-fracp)+f2*fracp;
+        
+          *(data+1) = er*ep-ecut;
+        
+          if (flag=='x') 
             {
-              i = (int)((r-rmin)/dr);
-              frac = (r-(*(table_pauli+7*i+0)))/dr;
-  
-              f1 = *(table_pauli+7*i+5); 
-              f2 = *(table_pauli+7*(i+1)+5); 
-              e1 = *(table_pauli+7*i+4); 
-              e2 = *(table_pauli+7*(i+1)+4); 
- 
               *(data+0) = r;
-              *(data+1) = e1*(1.0-frac)+e2*frac;
-              *(data+2) = f1*(1.0-frac)+f2*frac;
+              *(data+1) = er*ep-ecut;
+              *(data+2) = (r/r02)*fr*fp;
             }
-        }
-      else if (flag=='p')
-        {      
-          pmin = *(table_pauli+1);
-          pmax = *(table_pauli+7*(ntable-1)+1);
 
-          p  = sqrt(r2);
-          dp = (pmax-pmin)/(double)(ntable-1);
-
-          if (p<pmax) 
+          if (flag=='p') 
             {
-              i = (int)((p-pmin)/dp);
-              frac = (p-(*(table_pauli+7*i+1)))/dp;
-  
-              f1 = *(table_pauli+7*i+6); 
-              f2 = *(table_pauli+7*(i+1)+6); 
-              e1 = *(table_pauli+7*i+4); 
-              e2 = *(table_pauli+7*(i+1)+4); 
- 
               *(data+0) = p;
-              *(data+1) = e1*(1.0-frac)+e2*frac;
-              *(data+2) = f1*(1.0-frac)+f2*frac;
+              *(data+1) = er*ep-ecut;
+              *(data+2) = (p/p02)*fr*fp;
             }
-        }
+        }        
     }
   
   return;
@@ -1203,16 +1203,16 @@ void build_pauli_table(double ri,double rf,double pi,double pf,int ntable)
       expr2 = 1.0/exp(r2q2);
       expp2 = 1.0/exp(p2p2);
 
-      // store as "r,p,r2,p2,v,fr,fp" (extra columns with respect to Lammps format)
+      // store as "r,p,r2,p2,fr,fp,cutoff" (extra columns with respect to Lammps format)
       // warning: D is consirered  to be unity here!!!
     
       *(table_pauli+7*i+0) = r;
       *(table_pauli+7*i+1) = p;
       *(table_pauli+7*i+2) = r2;
       *(table_pauli+7*i+3) = p2;
-      *(table_pauli+7*i+4) = expr2*expp2-exprcr*exprcp;
-      *(table_pauli+7*i+5) = (r/q02)*expr2*expp2;
-      *(table_pauli+7*i+6) = (p/p02)*expr2*expp2;
+      *(table_pauli+7*i+4) = expr2;
+      *(table_pauli+7*i+5) = expp2;
+      *(table_pauli+7*i+6) = exprcr*exprcp;
     }
 
   return;
