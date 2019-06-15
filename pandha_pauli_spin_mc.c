@@ -72,7 +72,7 @@ int     computelist(double *x,double *v,double *p,double *f,double *e,double *ne
 void    build_pandha_table(double ri,double rf,int ntable);
 void    build_pauli_table(double ri,double rf,double pi,double pf,int ntable);
 void    get_table_pandha(double *data,int *ptype,double r2,int ii,int jj,int ntable);
-void    get_table_pauli(double *data,int *ptype,double r2,char flag,int ii,int jj,int ntable);
+void    get_table_pauli(double *data,int *ptype,double r2,double p2,char flag,int ii,int jj,int ntable);
 int     tfmc(double *x,double *v,double *p,double *f,double delta_x,double delta_p,double tset,double dim,int n);
 void    thermo(double *data,double *v,double *p,double *k,double *e,int n);
 double  normaldist();
@@ -630,18 +630,19 @@ int computelist(double *x,double *v,double *p,double *f,double *e,double *neighb
                               fr = *(ref+2);
 
                               if (r > 0.0)
-                                {                              
-                                  fx = dx*fr/r;
-                                  fy = dy*fr/r;
-                                  fz = dz*fr/r;
+                                {     
+                                  // warning: no division by r is necessary!!!
+                                  fx = dx*fr;
+                                  fy = dy*fr;
+                                  fz = dz*fr;
 
-                                  *(e+i) += D*ep/(double)n;
-                                  *(f+3*i+0) += D*fx;
-                                  *(f+3*i+1) += D*fy;
-                                  *(f+3*i+2) += D*fz;
-                                  *(f+3*j+0) -= D*fx;
-                                  *(f+3*j+1) -= D*fy;
-                                  *(f+3*j+2) -= D*fz;
+                                  *(e+i) += ep/(double)n;
+                                  *(f+3*i+0) += fx;
+                                  *(f+3*i+1) += fy;
+                                  *(f+3*i+2) += fz;
+                                  *(f+3*j+0) -= fx;
+                                  *(f+3*j+1) -= fy;
+                                  *(f+3*j+2) -= fz;
                                 }
 
                               get_table_pauli(ref,ptype,r2,p2,'p',i,j,PAUTAB);
@@ -651,17 +652,18 @@ int computelist(double *x,double *v,double *p,double *f,double *e,double *neighb
                               vr = *(ref+2);
 
                               if (pr > 0.0)
-                                {                              
-                                  vx = dpx*vr/pr;
-                                  vy = dpy*vr/pr;
-                                  vz = dpz*vr/pr;
+                                {            
+                                  // warning: no division by r is necessary!!!
+                                  vx = dpx*vr;
+                                  vy = dpy*vr;
+                                  vz = dpz*vr;
 
-                                  *(v+3*i+0) += D*vx;
-                                  *(v+3*i+1) += D*vy;
-                                  *(v+3*i+2) += D*vz; 
-                                  *(v+3*j+0) -= D*vx;
-                                  *(v+3*j+1) -= D*vy;
-                                  *(v+3*j+2) -= D*vz; 
+                                  *(v+3*i+0) += vx;
+                                  *(v+3*i+1) += vy;
+                                  *(v+3*i+2) += vz; 
+                                  *(v+3*j+0) -= vx;
+                                  *(v+3*j+1) -= vy;
+                                  *(v+3*j+2) -= vz; 
 
                                   if (pr<pij) pij = pr;
                                 }
@@ -865,8 +867,12 @@ void get_table_pauli(double *data,int *ptype,double r2,double p2,char flag,int i
   int    i,j,itype,jtype;
   double dr,r,rmin,rmax;
   double dp,p,pmin,pmax;
-  double fracx,fracp,f1,f2,fr,fp,er,ep,ecut;
-
+  double r02,p02,fracx,fracp;
+  double f1,f2,fr,fp,er,ep,ecut;
+ 
+  r02 = Q0*Q0;
+  p02 = P0*P0;
+  
   *(data+0) = 0.0;
   *(data+1) = 0.0;
   *(data+2) = 0.0;
@@ -877,7 +883,7 @@ void get_table_pauli(double *data,int *ptype,double r2,double p2,char flag,int i
   if (itype==jtype)  
     {
 
-      // recall the format "r,p,r2,p2,v,fr,fp"
+      // recall the format "r,p,r2,p2,v,fr,fp,cutoff"
       // warning: D is consirered  to be unity here!!!
     
       rmin = *(table_pauli+0);
@@ -915,15 +921,15 @@ void get_table_pauli(double *data,int *ptype,double r2,double p2,char flag,int i
           if (flag=='x') 
             {
               *(data+0) = r;
-              *(data+1) = er*ep-ecut;
-              *(data+2) = (r/r02)*fr*fp;
+              *(data+1) = D*(er*ep-ecut);
+              *(data+2) = D*fr*fp/r02;
             }
 
           if (flag=='p') 
             {
               *(data+0) = p;
-              *(data+1) = er*ep-ecut;
-              *(data+2) = (p/p02)*fr*fp;
+              *(data+1) = D*(er*ep-ecut);
+              *(data+2) = D*fr*fp/p02;
             }
         }        
     }
