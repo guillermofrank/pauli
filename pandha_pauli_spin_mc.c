@@ -654,6 +654,7 @@ int computelist(double *x,double *v,double *p,double *f,double *e,double *neighb
                               if (pr > 0.0)
                                 {            
                                   // warning: no division by r is necessary!!!
+                                  // warning: the sign of vr follows the same rule as fr!!! 
                                   vx = dpx*vr;
                                   vy = dpy*vr;
                                   vz = dpz*vr;
@@ -795,9 +796,11 @@ void thermo(double *data,double *v,double *p,double *k,double *e,int n)
       py = *(p+3*i+1);
       pz = *(p+3*i+2);
 
-      vx = (*(v+3*i+0)) + px/M;
-      vy = (*(v+3*i+1)) + py/M;
-      vz = (*(v+3*i+2)) + pz/M;
+      // warning: minus sign is correct!!!
+    
+      vx = px/M - (*(v+3*i+0));
+      vy = py/M - (*(v+3*i+1));
+      vz = pz/M - (*(v+3*i+2));
 
       *(k+i) = (px*px+py*py+pz*pz)/m2;
 
@@ -1072,9 +1075,11 @@ double read_data(char *myfile,double *x,double *v,double *p,double *f,int *ptype
     *(x+3*id+1)=(double)ry;
     *(x+3*id+2)=(double)rz;
 
-    *(v+3*id+0)=(double)vx;
-    *(v+3*id+1)=(double)vy;
-    *(v+3*id+2)=(double)vz;
+    // warning: minus to follows our own sign rules!!!
+    
+    *(v+3*id+0)=-(double)vx;
+    *(v+3*id+1)=-(double)vy;
+    *(v+3*id+2)=-(double)vz;
 
     *(p+3*id+0)=(double)px;
     *(p+3*id+1)=(double)py;
@@ -1104,7 +1109,7 @@ int write_header(FILE *fp,double dim,int atoms,int timestep)
   fprintf(fp,"%f %f\n",0.0,dim);
   fprintf(fp,"%f %f\n",0.0,dim);
   fprintf(fp,"%f %f\n",0.0,dim);
-  fprintf(fp,"ITEM: ATOMS id type x y z vx vy vz px py pz fx fy fz\n");
+  fprintf(fp,"ITEM: ATOMS id type x y z gx gy gz px py pz fx fy fz\n");
   return 1;
 }
 
@@ -1116,7 +1121,7 @@ int write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int a
     {
       fprintf(fp,"%d %d",i+1,*(ptype+i));
       fprintf(fp," %f %f %f",*(x+3*i+0),*(x+3*i+1),*(x+3*i+2));
-      fprintf(fp," %f %f %f",*(v+3*i+0),*(v+3*i+1),*(v+3*i+2));
+      fprintf(fp," %f %f %f",-(*(v+3*i+0)),-(*(v+3*i+1)),-(*(v+3*i+2)));
       fprintf(fp," %f %f %f",*(p+3*i+0),*(p+3*i+1),*(p+3*i+2));
       fprintf(fp," %f %f %f",*(f+3*i+0),*(f+3*i+1),*(f+3*i+2));
       fprintf(fp,"\n");
