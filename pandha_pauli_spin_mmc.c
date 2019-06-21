@@ -68,7 +68,7 @@ int     write_header(FILE *fp,double dim,int atoms,int timestep);
 int     write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms);
 
 int     buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc);
-int     computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,double dim,int n,int nc);
+double  computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,double dim,int n,int nc);
 void    build_pandha_table(double ri,double rf,int ntable);
 void    build_pauli_table(double ri,double rf,double pi,double pf,int ntable);
 void    get_table_pandha(double *data,int *ptype,double r2,int ii,int jj,int ntable);
@@ -80,13 +80,17 @@ double  checkperformance1(double temp,double tend,double dim,int tmax,int nc,int
 int     checkperformance2(double *neighbor,double delta_x,double delta_p,double temp);
 double  controldelta(double *neighbor,double delta,double ratio);
 
+int     trial(double *x,double *p,double *xtrial,double *ptrial,int *head,int *lscl,int *headtl,int *lscltl,double delta_x,double delta_p,double dim,int n,int nc);
+double  energy(double *v,double *p,double *e,int n);
+int     copy(double *xi,double *yi,int *xj,int *yj,int ni,int nj);
+
 int main(int argc, char *argv[])
 {
   char    option[20],myfile[40];
   int     i,n,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
-  int     nc,*head,*lscl,*ptype;
-  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,pmin,dt,ratio;
-  double  *x,*v,*p,*f,*k,*e,*neighbor,*data;
+  int     nc,*head,*lscl,*headtl,*lscltl,*ptype;
+  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,pmin,dt,ratio,e0,exnew,epnew;
+  double  *x,*v,*p,*f,*k,*e,*neighbor,*data,*xtrial,*ptrial,*vtrial,*ftrial,*etrial;
   clock_t c0,c1;
   FILE    *fp1;
 
@@ -165,6 +169,12 @@ int main(int argc, char *argv[])
           p = (double *)malloc(3*n*sizeof(double));
           f = (double *)malloc(3*n*sizeof(double));
 
+          etrial = (double *)malloc(n*sizeof(double));
+          xtrial = (double *)malloc(3*n*sizeof(double));
+          ptrial = (double *)malloc(3*n*sizeof(double));
+          vtrial = (double *)malloc(3*n*sizeof(double));
+          ftrial = (double *)malloc(3*n*sizeof(double));
+
           teff = read_data(myfile,x,v,p,f,ptype,n);
           term = 0;
           delta_x = DELTAM;
@@ -188,6 +198,12 @@ int main(int argc, char *argv[])
       p = (double *)malloc(3*n*sizeof(double));
       f = (double *)malloc(3*n*sizeof(double));
 
+      etrail = (double *)malloc(n*sizeof(double));
+      xtrial = (double *)malloc(3*n*sizeof(double));
+      ptrial = (double *)malloc(3*n*sizeof(double));
+      vtrial = (double *)malloc(3*n*sizeof(double));
+      ftrial = (double *)malloc(3*n*sizeof(double));
+
       dim=inicial(x,v,p,f,ptype,rho,temp,xproton,ndim); 
     }
 
@@ -197,8 +213,11 @@ int main(int argc, char *argv[])
 
   rcell=checkperformance1(temp,tend,dim,tmax,nc,n);
 
-  head = (int *)malloc(nc*nc*nc*sizeof(int));
-  lscl = (int *)malloc(n*sizeof(int));
+  head   = (int *)malloc(nc*nc*nc*sizeof(int));
+  lscl   = (int *)malloc(n*sizeof(int));
+  headtl = (int *)malloc(nc*nc*nc*sizeof(int));
+  lscltl = (int *)malloc(n*sizeof(int));
+
   buildlist(x,head,lscl,rcell,n,nc);
 
   printf("\nbuilding lists\t\t\t[OK]\n");
@@ -208,8 +227,8 @@ int main(int argc, char *argv[])
 
   printf("building tables\t\t\t[OK]\n");
 
-  tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-  computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
+  //tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
+  e0 = computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
   buildlist(x,head,lscl,rcell,n,nc);
 
   checkperformance2(neighbor,delta_x,delta_p,temp);
@@ -220,10 +239,17 @@ int main(int argc, char *argv[])
 
       while (t<term)
         {
-          tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-          computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
-          buildlist(x,head,lscl,rcell,n,nc);
-          t++;
+          for (i=0;i<n;i++)
+            {
+              trial(x,p,xtrial,ptrial,head,lscl,headtl,lscltl,delta_x,delta_p,dim,n,nc);
+              buildlist(xtrial,headtl,lscltl,rcell,n,nc);
+              exnew = computelist(xtrial,vtrial,p,ftrial,etrial,neighbor,headtl,lscltl,ptype,dim,n,nc);
+              epnew = computelist(xtrial,vtrial,ptrial,ftrial,etrial,neighbor,headtl,lscltl,ptype,dim,n,nc);
+              
+              
+              
+              t++;
+            }
         }
 
       delta_x=controldelta(neighbor+0,delta_x,ratio);
@@ -314,9 +340,16 @@ int main(int argc, char *argv[])
   free(p);
   free(f);
 
+  free(etrial);
+  free(xtrial);
+  free(ptrial);
+  free(vtrial);
+  free(ftrial);
+
   free(head);
   free(lscl);
-
+  free(headtl);
+  free(lscltl);
 
   c1=clock();
 
@@ -530,11 +563,142 @@ int buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc)
   return 1;
 }
 
-int computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,double dim,int n,int nc)
+int metropolis(double e0,double exnew,double epnew,double tset,int n,int nc)
+{
+  int    i,j;
+  double probi,probj;
+
+  i = 0;
+  j = 0;
+
+  probi = (double)rand()/(double)RAND_MAX;
+  probj = (double)rand()/(double)RAND_MAX;
+
+  if (probi < exp(-(exnew-e0)/tset)) i = 1;
+  if (probj < exp(-(epnew-e0)/tset)) j = 1;
+
+  if ((i=1) && (j=0)) 
+    {
+      for (h=0;h<3*n;h++)      *(x+h) = (*(xtrial+h)); 
+      for (h=0;h<nc*nc*nc;h++) *(head+h) = (*(headtl+h)); 
+      for (h=0;h<n;h++)        *(lscl+h) = (*(lscltl+h)); 
+    }
+
+  if ((i=1) && (j=0)) 
+    {
+      for (h=0;h<3*n;h++)      *(p+h) = (*(ptrial+h)); 
+      for (h=0;h<nc*nc*nc;h++) *(head+h) = (*(headtl+h)); 
+      for (h=0;h<n;h++)        *(lscl+h) = (*(lscltl+h)); 
+    }
+
+  if ((i=1) && (j=1)) 
+    {
+      for (h=0;h<nc*nc*nc;h++) *(head+h) = (*(headtl+h)); 
+      for (h=0;h<n;h++)        *(lscl+h) = (*(lscltl+h)); 
+
+      for (h=0;h<3*n;h++)     
+         {
+           *(x+h) = (*(xtrial+h)); 
+           *(p+h) = (*(ptrial+h));
+         }
+    }
+
+  return 1;
+}
+
+int trial(double *x,double *p,double *xtrial,double *ptrial,int *head,int *lscl,int *headtl,int *lscltl,double delta_x,double delta_p,double dim,int n,int nc)
+{
+  int    i,j;
+  double dx,dy,dz;
+  double dpx,dpy,dpz;
+
+  for (i=0;i<n;i++)        *(lscltl+i) = (*(lscl+i));
+  for (i=0;i<nc*nc*nc;i++) *(headtl+i) = (*(head+i));
+
+  for (i=0;i<3*n;i++)
+    {
+       *(xtrial+i) = (*(x+i));
+       *(ptrial+i) = (*(p+i));
+    }
+
+  i = rand()%n;
+
+  dx = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  dy = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  dz = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+
+  *(xtrial+3*i+0) = (*(x+3*i+0)) + dx;
+  *(xtrial+3*i+1) = (*(x+3*i+1)) + dy;
+  *(xtrial+3*i+2) = (*(x+3*i+2)) + dz;
+
+  if (*(xtrial+3*i+0)<0.0) *(xtrial+3*i+0) = (*(xtrial+3*i+0))+dim;
+  if (*(xtrial+3*i+0)>dim) *(xtrial+3*i+0) = (*(xtrial+3*i+0))-dim;
+  if (*(xtrial+3*i+1)<0.0) *(xtrial+3*i+1) = (*(xtrial+3*i+1))+dim;
+  if (*(xtrial+3*i+1)>dim) *(xtrial+3*i+1) = (*(xtrial+3*i+1))-dim;
+  if (*(xtrial+3*i+2)<0.0) *(xtrial+3*i+2) = (*(xtrial+3*i+2))+dim;
+  if (*(xtrial+3*i+2)>dim) *(xtrial+3*i+2) = (*(xtrial+3*i+2))-dim;
+
+  j = rand()%n;
+
+  dpx = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  dpy = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  dpz = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+
+  *(ptrial+3*j+0) = (*(p+3*j+0)) + dpx;
+  *(ptrial+3*j+1) = (*(p+3*j+1)) + dpy;
+  *(ptrial+3*j+2) = (*(p+3*j+2)) + dpz;
+
+  return 1;
+}
+
+int copy(double *xi,double *yi,int *xj,int *yj,int ni,int nj)
+{
+  int i,j;
+
+  for(i=0;i<ni;i++) *(yi+i) = (*(xi+i));
+  for(j=0;j<nj;j++) *(yj+j) = (*(xj+j));
+
+  return 1;
+}
+
+double energy(double *v,double *p,double *e,int n)
+{
+  int    i;
+  double vx,vy,vz,px,py,pz;
+  double m2,ec,ep,etot;
+
+  ec   = 0.0;
+  ep   = 0.0;
+  m2   = 2.0*M;
+  etot = 0.0;
+ 
+  for(i=0;i<n;i++) 
+    {
+      px = *(p+3*i+0);
+      py = *(p+3*i+1);
+      pz = *(p+3*i+2);
+
+      // warning: minus sign is correct!!!
+    
+      vx = px/M - (*(v+3*i+0));
+      vy = py/M - (*(v+3*i+1));
+      vz = pz/M - (*(v+3*i+2));
+
+      ep   += (*(e+i));
+      ec   += (px*px+py*py+pz*pz)/m2;
+    }
+
+  etot = ec+(double)(n)*ep;
+
+  return etot;
+}
+
+
+double computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,double dim,int n,int nc)
 {
   int    h,i,j,k,c,cx,cy,cz,cc,ccx,ccy,ccz;
   double dx,dy,dz,dpx,dpy,dpz,r,pr,r2,p2,dij,dmin,pij,pmin;
-  double fx,fy,fz,fr,vx,vy,vz,vr,ep;
+  double fx,fy,fz,fr,vx,vy,vz,vr,ep,etot;
   double shift[3],ref[3];
 
   h = 0;
@@ -693,7 +857,9 @@ int computelist(double *x,double *v,double *p,double *f,double *e,double *neighb
   *(neighbor+0) = dmin/(double)h;
   *(neighbor+1) = pmin/(double)k;
 
-  return 1;
+  etot = energy(v,p,e,n);
+
+  return etot;
 }
 
 
