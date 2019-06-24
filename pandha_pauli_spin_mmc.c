@@ -68,7 +68,7 @@ int     write_header(FILE *fp,double dim,int atoms,int timestep);
 int     write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms);
 
 int     buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc);
-double  computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,double dim,int n,int nc);
+int     computelist(double *x,double *v,double *p,double *f,double *e,int *head,int *lscl,int *ptype,double dim,int n,int nc);
 void    build_pandha_table(double ri,double rf,int ntable);
 void    build_pauli_table(double ri,double rf,double pi,double pf,int ntable);
 void    get_table_pandha(double *data,int *ptype,double r2,int ii,int jj,int ntable);
@@ -77,22 +77,19 @@ int     tfmc(double *x,double *v,double *p,double *f,double delta_x,double delta
 void    thermo(double *data,double *v,double *p,double *k,double *e,int n);
 double  normaldist();
 double  checkperformance1(double temp,double tend,double dim,int tmax,int nc,int n);
-int     checkperformance2(double *neighbor,double delta_x,double delta_p,double temp);
-double  controldelta(double *neighbor,double delta,double ratio);
 
-int     trial(double *x,double *p,double *xtrial,double *ptrial,int *head,int *lscl,int *headtl,int *lscltl,double delta_x,double delta_p,double dim,int n,int nc);
-double  energy(double *v,double *p,double *e,int n);
-int     copy(double *xi,double *yi,int *xj,int *yj,int ni,int nj);
+double  metropolis(double *x,double *p,double *pacc,int *head,int *lscl,int *ptype,double temp,double rcell,double delta_x,double delta_p,double dim,int n,int nc);
 
 int main(int argc, char *argv[])
 {
   char    option[20],myfile[40];
   int     i,n,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
-  int     nc,*head,*lscl,*headtl,*lscltl,*ptype;
-  double  rho,dim,rcell,temp,teff,tend,xproton,ekin,epair,etot,delta_x,delta_p,dmin,pmin,dt,ratio,e0,exnew,epnew;
-  double  *x,*v,*p,*f,*k,*e,*neighbor,*data,*xtrial,*ptrial,*vtrial,*ftrial,*etrial;
+  int     nc,*head,*lscl,*ptype;
+  double  rho,dim,rcell,temp,teff,tend,xproton;
+  double  ekin,epair,etot,delta_x,delta_p,ratio;
+  double  *x,*v,*p,*f,*k,*e,*data,pacc[2];
   clock_t c0,c1;
-  FILE    *fp1;
+  //FILE    *fp1;
 
   c0=clock();
   
@@ -160,7 +157,6 @@ int main(int argc, char *argv[])
 
           ptype = (int *)malloc(n*sizeof(int));
           data = (double *)malloc(10*sizeof(double));
-          neighbor = (double *)malloc(2*sizeof(double));
 
           k = (double *)malloc(n*sizeof(double));
           e = (double *)malloc(n*sizeof(double));
@@ -168,12 +164,6 @@ int main(int argc, char *argv[])
           v = (double *)malloc(3*n*sizeof(double));
           p = (double *)malloc(3*n*sizeof(double));
           f = (double *)malloc(3*n*sizeof(double));
-
-          etrial = (double *)malloc(n*sizeof(double));
-          xtrial = (double *)malloc(3*n*sizeof(double));
-          ptrial = (double *)malloc(3*n*sizeof(double));
-          vtrial = (double *)malloc(3*n*sizeof(double));
-          ftrial = (double *)malloc(3*n*sizeof(double));
 
           teff = read_data(myfile,x,v,p,f,ptype,n);
           term = 0;
@@ -189,7 +179,6 @@ int main(int argc, char *argv[])
 
       ptype = (int *)malloc(n*sizeof(int));
       data = (double *)malloc(10*sizeof(double));  // 10 thermodynamical magnitudes (can be upscaled)
-      neighbor = (double *)malloc(2*sizeof(double));
 
       k = (double *)malloc(n*sizeof(double));
       e = (double *)malloc(n*sizeof(double));
@@ -198,14 +187,11 @@ int main(int argc, char *argv[])
       p = (double *)malloc(3*n*sizeof(double));
       f = (double *)malloc(3*n*sizeof(double));
 
-      etrail = (double *)malloc(n*sizeof(double));
-      xtrial = (double *)malloc(3*n*sizeof(double));
-      ptrial = (double *)malloc(3*n*sizeof(double));
-      vtrial = (double *)malloc(3*n*sizeof(double));
-      ftrial = (double *)malloc(3*n*sizeof(double));
-
       dim=inicial(x,v,p,f,ptype,rho,temp,xproton,ndim); 
     }
+
+  *(pacc+0) = 0.0;
+  *(pacc+1) = 0.0;
 
   if (tend==0.0) tend = temp;
 
@@ -213,43 +199,82 @@ int main(int argc, char *argv[])
 
   rcell=checkperformance1(temp,tend,dim,tmax,nc,n);
 
-  head   = (int *)malloc(nc*nc*nc*sizeof(int));
-  lscl   = (int *)malloc(n*sizeof(int));
-  headtl = (int *)malloc(nc*nc*nc*sizeof(int));
-  lscltl = (int *)malloc(n*sizeof(int));
-
-  buildlist(x,head,lscl,rcell,n,nc);
-
   printf("\nbuilding lists\t\t\t[OK]\n");
 
   build_pandha_table(RI,RCPAN,PANTAB);
   build_pauli_table(RI,RCRPAU,PI,RCPPAU,PAUTAB);
 
-  printf("building tables\t\t\t[OK]\n");
+  printf("building tables\t\t\t[OK]\n\n");
 
-  //tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-  e0 = computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
+
+  head   = (int *)malloc(nc*nc*nc*sizeof(int));
+  lscl   = (int *)malloc(n*sizeof(int));
+
+  printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total \tpacc(x)\t\tpacc(p)\n\n");
+
   buildlist(x,head,lscl,rcell,n,nc);
+  computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
 
-  checkperformance2(neighbor,delta_x,delta_p,temp);
+  thermo(data,v,p,k,e,n);
+
+  teff  = *(data+0);
+  ekin  = *(data+1);
+  epair = *(data+2);
+  etot  = *(data+3);
+
+  printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,etot,*(pacc+0),*(pacc+1));
  
+  t  = 1;
+  tmax++;
+
+  while (t<tmax)
+    {
+      *(pacc+0) = 0.0;
+      *(pacc+1) = 0.0;
+
+      for (i=0;i<n;i++) 
+        {
+          etot += metropolis(x,p,pacc,head,lscl,ptype,temp,rcell,delta_x,delta_p,dim,n,nc);
+        }
+
+      buildlist(x,head,lscl,rcell,n,nc);  
+
+      if (tctrl>0 && t%tctrl==0) 
+        {
+          if (*(pacc+0) < 0.40) delta_x *= 1.0-ratio;
+          if (*(pacc+0) > 0.60) delta_x *= 1.0+ratio;
+          if (*(pacc+1) < 0.40) delta_p *= 1.0-ratio;
+          if (*(pacc+1) > 0.60) delta_p *= 1.0+ratio; 
+        }
+
+      if(thsamp>0 && t%thsamp==0) 
+        {
+          computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
+
+          thermo(data,v,p,k,e,n);
+ 
+          teff  = *(data+0);
+          ekin  = *(data+1);
+          epair = *(data+2);
+          //etot  = *(data+3);
+
+          printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,ekin+epair,*(pacc+0),*(pacc+1));
+        }
+
+
+
+      t++;
+    }
+
+
+  /*--------------------------------------------------------------------------------------------------
   if (term)
     {
       t=0;
 
       while (t<term)
         {
-          for (i=0;i<n;i++)
-            {
-              trial(x,p,xtrial,ptrial,head,lscl,headtl,lscltl,delta_x,delta_p,dim,n,nc);
-              buildlist(xtrial,headtl,lscltl,rcell,n,nc);
-              exnew = computelist(xtrial,vtrial,p,ftrial,etrial,neighbor,headtl,lscltl,ptype,dim,n,nc);
-              epnew = computelist(xtrial,vtrial,ptrial,ftrial,etrial,neighbor,headtl,lscltl,ptype,dim,n,nc);
-              
-              
-              
-              t++;
-            }
+          
         }
 
       delta_x=controldelta(neighbor+0,delta_x,ratio);
@@ -329,9 +354,10 @@ int main(int argc, char *argv[])
 
   if(tsamp>0) fclose(fp1);
   
+  ------------------------------------------------------------------------------*/
+
   free(data);
   free(ptype);
-  free(neighbor);
 
   free(k);
   free(e);
@@ -340,16 +366,8 @@ int main(int argc, char *argv[])
   free(p);
   free(f);
 
-  free(etrial);
-  free(xtrial);
-  free(ptrial);
-  free(vtrial);
-  free(ftrial);
-
   free(head);
   free(lscl);
-  free(headtl);
-  free(lscltl);
 
   c1=clock();
 
@@ -454,7 +472,7 @@ double inicial(double *x,double *v,double *p,double *f,int *ptype,double rho,dou
     }
 
   printf("\n");
-  printf("atoms      = %d\t\t",h);
+  printf("atoms         = %d\t\t",h);
 
   nless = (ndim-1)*(ndim-1)*(ndim-1);
   nplus = (ndim+1)*(ndim+1)*(ndim+1);
@@ -467,9 +485,9 @@ double inicial(double *x,double *v,double *p,double *f,int *ptype,double rho,dou
   printf("neutrons down = %d\n\n",nndn);
   printf("proton frac.  = %d/(%d+%d)\n\n",npup+npdn,npup+npdn,nnup+nndn);
 
-  printf("density    = %f\n",(double)h/(dim*dim*dim));
-  printf("box size   = %f\n",dim);
-  printf("atom dist. = %f\n",r);
+  printf("density       = %f\n",(double)h/(dim*dim*dim));
+  printf("box size      = %f\n",dim);
+  printf("atom dist.    = %f\n",r);
 
   return dim;
 }
@@ -487,57 +505,17 @@ double checkperformance1(double temp,double tend,double dim,int tmax,int nc,int 
   rcell  = dim/(double)nc;
 
   printf("\n");
-  printf("cells      = %d\t\t\t",ncells);
+  printf("cells         = %d\t\t\t",ncells);
 
   if (ncells<8) printf("[warning: too few cells. I suggest to resize the original cells]\n");
   else printf("\n"); 
 
-  printf("cell size  = %f\t\t",rcell); 
+  printf("cell size     = %f\t",rcell); 
 
   if (rcell!=RCELL) printf("[warning: cells resized (original %f)]\n",RCELL);
   else printf("\n"); 
 
   return rcell;
-}
-
-
-int checkperformance2(double *neighbor,double delta_x,double delta_p,double temp)
-{
-  double dmin,dpmin,mytime;
- 
-  dmin  = *(neighbor+0);
-  dpmin = *(neighbor+1);
-
-  mytime = delta_x*sqrt(1.570796327*M/temp)/3.0;
-
-  printf("\ndelta (x) = %f\t\t",delta_x);
-  if (mytime<1.0) printf("[warning: <t> ~ %f . I suggest to increase delta (x)]\n",mytime);
-  else printf("[<t> ~ %f]\n",mytime);
-
-  printf("delta (p) = %f\n",delta_p);
-
-  printf("neigh. distance = %f\t",dmin);
-  if (delta_x>0.1*dmin) printf("[warning: delta (x) exceeds 0.1 neighbor distance. I suggest to decrease delta (x)]\n");
-  else printf("[ratio delta_x/dmin ~ %f]\n",delta_x/dmin);
-
-  printf("neigh. momentum = %f\t",dpmin);
-  if (delta_p>0.1*dpmin) printf("[warning: delta (p) exceeds 0.1 neighbor distance. I suggest to decrease delta (p)]\n\n");
-  else printf("[ratio delta_p/dpmin ~ %f]\n\n",delta_p/dpmin);
-
-  return 1;
-}
-
-
-double controldelta(double *neighbor,double delta,double ratio)
-{
-  double dist,r;
- 
-  dist  = *neighbor;
-  r = delta/dist;
-
-  if ((r<TOL*ratio) || (r>ratio/TOL)) delta = ratio*dist;
-
-  return delta;
 }
 
 
@@ -563,148 +541,13 @@ int buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc)
   return 1;
 }
 
-int metropolis(double e0,double exnew,double epnew,double tset,int n,int nc)
+
+int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int *lscl,int *ptype,double dim,int n,int nc)
 {
-  int    i,j;
-  double probi,probj;
-
-  i = 0;
-  j = 0;
-
-  probi = (double)rand()/(double)RAND_MAX;
-  probj = (double)rand()/(double)RAND_MAX;
-
-  if (probi < exp(-(exnew-e0)/tset)) i = 1;
-  if (probj < exp(-(epnew-e0)/tset)) j = 1;
-
-  if ((i=1) && (j=0)) 
-    {
-      for (h=0;h<3*n;h++)      *(x+h) = (*(xtrial+h)); 
-      for (h=0;h<nc*nc*nc;h++) *(head+h) = (*(headtl+h)); 
-      for (h=0;h<n;h++)        *(lscl+h) = (*(lscltl+h)); 
-    }
-
-  if ((i=1) && (j=0)) 
-    {
-      for (h=0;h<3*n;h++)      *(p+h) = (*(ptrial+h)); 
-      for (h=0;h<nc*nc*nc;h++) *(head+h) = (*(headtl+h)); 
-      for (h=0;h<n;h++)        *(lscl+h) = (*(lscltl+h)); 
-    }
-
-  if ((i=1) && (j=1)) 
-    {
-      for (h=0;h<nc*nc*nc;h++) *(head+h) = (*(headtl+h)); 
-      for (h=0;h<n;h++)        *(lscl+h) = (*(lscltl+h)); 
-
-      for (h=0;h<3*n;h++)     
-         {
-           *(x+h) = (*(xtrial+h)); 
-           *(p+h) = (*(ptrial+h));
-         }
-    }
-
-  return 1;
-}
-
-int trial(double *x,double *p,double *xtrial,double *ptrial,int *head,int *lscl,int *headtl,int *lscltl,double delta_x,double delta_p,double dim,int n,int nc)
-{
-  int    i,j;
-  double dx,dy,dz;
-  double dpx,dpy,dpz;
-
-  for (i=0;i<n;i++)        *(lscltl+i) = (*(lscl+i));
-  for (i=0;i<nc*nc*nc;i++) *(headtl+i) = (*(head+i));
-
-  for (i=0;i<3*n;i++)
-    {
-       *(xtrial+i) = (*(x+i));
-       *(ptrial+i) = (*(p+i));
-    }
-
-  i = rand()%n;
-
-  dx = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
-  dy = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
-  dz = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
-
-  *(xtrial+3*i+0) = (*(x+3*i+0)) + dx;
-  *(xtrial+3*i+1) = (*(x+3*i+1)) + dy;
-  *(xtrial+3*i+2) = (*(x+3*i+2)) + dz;
-
-  if (*(xtrial+3*i+0)<0.0) *(xtrial+3*i+0) = (*(xtrial+3*i+0))+dim;
-  if (*(xtrial+3*i+0)>dim) *(xtrial+3*i+0) = (*(xtrial+3*i+0))-dim;
-  if (*(xtrial+3*i+1)<0.0) *(xtrial+3*i+1) = (*(xtrial+3*i+1))+dim;
-  if (*(xtrial+3*i+1)>dim) *(xtrial+3*i+1) = (*(xtrial+3*i+1))-dim;
-  if (*(xtrial+3*i+2)<0.0) *(xtrial+3*i+2) = (*(xtrial+3*i+2))+dim;
-  if (*(xtrial+3*i+2)>dim) *(xtrial+3*i+2) = (*(xtrial+3*i+2))-dim;
-
-  j = rand()%n;
-
-  dpx = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
-  dpy = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
-  dpz = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
-
-  *(ptrial+3*j+0) = (*(p+3*j+0)) + dpx;
-  *(ptrial+3*j+1) = (*(p+3*j+1)) + dpy;
-  *(ptrial+3*j+2) = (*(p+3*j+2)) + dpz;
-
-  return 1;
-}
-
-int copy(double *xi,double *yi,int *xj,int *yj,int ni,int nj)
-{
-  int i,j;
-
-  for(i=0;i<ni;i++) *(yi+i) = (*(xi+i));
-  for(j=0;j<nj;j++) *(yj+j) = (*(xj+j));
-
-  return 1;
-}
-
-double energy(double *v,double *p,double *e,int n)
-{
-  int    i;
-  double vx,vy,vz,px,py,pz;
-  double m2,ec,ep,etot;
-
-  ec   = 0.0;
-  ep   = 0.0;
-  m2   = 2.0*M;
-  etot = 0.0;
- 
-  for(i=0;i<n;i++) 
-    {
-      px = *(p+3*i+0);
-      py = *(p+3*i+1);
-      pz = *(p+3*i+2);
-
-      // warning: minus sign is correct!!!
-    
-      vx = px/M - (*(v+3*i+0));
-      vy = py/M - (*(v+3*i+1));
-      vz = pz/M - (*(v+3*i+2));
-
-      ep   += (*(e+i));
-      ec   += (px*px+py*py+pz*pz)/m2;
-    }
-
-  etot = ec+(double)(n)*ep;
-
-  return etot;
-}
-
-
-double computelist(double *x,double *v,double *p,double *f,double *e,double *neighbor,int *head,int *lscl,int *ptype,double dim,int n,int nc)
-{
-  int    h,i,j,k,c,cx,cy,cz,cc,ccx,ccy,ccz;
-  double dx,dy,dz,dpx,dpy,dpz,r,pr,r2,p2,dij,dmin,pij,pmin;
-  double fx,fy,fz,fr,vx,vy,vz,vr,ep,etot;
+  int    i,j,c,cx,cy,cz,cc,ccx,ccy,ccz;
+  double dx,dy,dz,dpx,dpy,dpz,r,pr,r2,p2;
+  double fx,fy,fz,fr,vx,vy,vz,vr,ep;
   double shift[3],ref[3];
-
-  h = 0;
-  k = 0;
-  dmin = 0.0;
-  pmin = 0.0;
 
   for (i=0; i<n; i++) 
     {
@@ -749,8 +592,7 @@ double computelist(double *x,double *v,double *p,double *f,double *e,double *nei
                   while (i != EMPTY) 
                     {
                       j   = head[cc];                      // scan atom j in cell cc
-                      dij = dim;
-                      pij = 100.0*P0;
+
                       while (j != EMPTY) 
                         {
                           if (i < j)                       // avoid double counting and correct image positions 
@@ -785,8 +627,6 @@ double computelist(double *x,double *v,double *p,double *f,double *e,double *nei
                                   *(f+3*j+0) -= fx;
                                   *(f+3*j+1) -= fy;
                                   *(f+3*j+2) -= fz;
-
-                                  if (r<dij) dij = r;
                                 }
                               
                               get_table_pauli(ref,ptype,r2,p2,'x',i,j,PAUTAB);
@@ -831,131 +671,228 @@ double computelist(double *x,double *v,double *p,double *f,double *e,double *nei
                                   *(v+3*j+0) -= vx;
                                   *(v+3*j+1) -= vy;
                                   *(v+3*j+2) -= vz; 
-
-                                  if (pr<pij) pij = pr;
                                 }
                             }
                           j = lscl[j];
                         }
-
                       i = lscl[i];
-
-                      if (dij<dim)        // compute typical nearest neighbor distance
-                        {
-                          dmin += dij; 
-                          h++;
-                        }
-                      if (pij<100.0*P0)   // compute typical nearest neighbor momentum
-                        {
-                          pmin += pij;
-                          k++;
-                        }
                     }
                 }
       }
 
-  *(neighbor+0) = dmin/(double)h;
-  *(neighbor+1) = pmin/(double)k;
-
-  etot = energy(v,p,e,n);
-
-  return etot;
+  return 1;
 }
 
-
-
-int tfmc(double *x,double *v,double *p,double *f,double delta_x,double delta_p,double tset,double dim,int n)
+double metropolis(double *x,double *p,double *pacc,int *head,int *lscl,int *ptype,double temp,double rcell,double delta_x,double delta_p,double dim,int n,int nc)
 {
-  int    h,i,j;
-  double p_acc,p_ran,gamma,gamma_exp,gamma_expi,xi,pi;
-  
-  for (i=0; i<n; i++) 
+  int    i,j,cx,cy,cz,cc,ccx,ccy,ccz;
+  double delx,dely,delz,delpx,delpy,delpz;
+  double px,py,pz,dx,dy,dz,dpx,dpy,dpz;
+  double r2,p2,ec,ep,etot,prob;
+  double pbc[3],shift[3],ref[3];
+
+  ec   = 0.0;
+  ep   = 0.0;
+  etot = 0.0;
+
+  i = rand()%n;
+
+  cx = (int)(*(x+3*i+0)/rcell);
+  cy = (int)(*(x+3*i+1)/rcell);
+  cz = (int)(*(x+3*i+2)/rcell);
+  //c  = cx*nc*nc+cy*nc+cz;
+
+  px = *(p+3*i+0);
+  py = *(p+3*i+1);
+  pz = *(p+3*i+2);
+
+  ec -= (px*px+py*py+pz*pz)/(2.0*M);
+
+  delpx = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  delpy = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  delpz = delta_p*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+
+  px += delpx;
+  py += delpy;
+  pz += delpz;
+
+  ec += (px*px+py*py+pz*pz)/(2.0*M);
+
+  for (ccx=cx-1; ccx<=cx+1; ccx++)                 // scan the neighbor cells (including itself)
+    for (ccy=cy-1; ccy<=cy+1; ccy++)
+      for (ccz=cz-1; ccz<=cz+1; ccz++) 
+        {
+          // periodic boundary condition by shifting coordinates
+
+          *(shift+0) = 0.0;
+          *(shift+1) = 0.0;
+          *(shift+2) = 0.0;
+
+          if (ccx<0) *(shift+0) = -dim;
+          else if (ccx>=nc) *(shift+0) = dim;
+
+          if (ccy<0) *(shift+1) = -dim;
+          else if (ccy>=nc) *(shift+1) = dim;
+
+          if (ccz<0) *(shift+2) = -dim;
+          else if (ccz>=nc) *(shift+2) = dim;
+                
+          cc = ((ccx+nc)%nc)*nc*nc+((ccy+nc)%nc)*nc+((ccz+nc)%nc);  
+                 
+          j = head[cc];                        // scan atom j in cell cc
+
+          while (j != EMPTY) 
+             {
+               if (i != j)                      // avoid double counting and correct image positions 
+                 {                            
+                   dx = (*(x+3*i+0)) - (*(x+3*j+0)) - (*(shift+0));
+                   dy = (*(x+3*i+1)) - (*(x+3*j+1)) - (*(shift+1));
+                   dz = (*(x+3*i+2)) - (*(x+3*j+2)) - (*(shift+2));
+                   r2 = dx*dx+dy*dy+dz*dz;
+                    
+                   dpx = (*(p+3*i+0)) - (*(p+3*j+0));
+                   dpy = (*(p+3*i+1)) - (*(p+3*j+1));
+                   dpz = (*(p+3*i+2)) - (*(p+3*j+2));
+                   p2  = dpx*dpx+dpy*dpy+dpz*dpz;
+     
+                   get_table_pauli(ref,ptype,r2,p2,'p',i,j,PAUTAB);
+                   ep -= (*(ref+1)); 
+
+                   dpx += delpx;
+                   dpy += delpy;
+                   dpz += delpz;
+                   p2  = dpx*dpx+dpy*dpy+dpz*dpz;
+     
+                   get_table_pauli(ref,ptype,r2,p2,'p',i,j,PAUTAB);
+                   ep += (*(ref+1)); 
+                 }
+               j = lscl[j];
+             }
+        }
+   
+  prob = (double)rand()/(double)RAND_MAX;
+
+  if (prob < exp(-(ec+ep)/temp))  // accept
     {
-      for (j=0; j<3; j++) 
-        {
-          p_acc = 0.0;
-          p_ran = 1.0;
-          gamma = (*(f+3*i+j))*delta_x/(2.0*tset);
-          gamma_exp = exp(gamma);
-          gamma_expi = 1.0/gamma_exp;
-          
-          h=0;
-          while (p_acc < p_ran) 
-            { 
-              xi = 2.0*((double)rand()/(double)RAND_MAX)-1.0;
-              p_ran = (double)rand()/(double)RAND_MAX;
-              if (xi<0.0) 
-                {
-                  p_acc = exp(2.0*xi*gamma) * gamma_exp - gamma_expi;
-                  p_acc = p_acc/(gamma_exp - gamma_expi);
-                } 
-              else if (xi>0.0) 
-                     {
-                       p_acc = gamma_exp - exp(2.0*xi*gamma) * gamma_expi;
-                       p_acc = p_acc/(gamma_exp - gamma_expi);
-                     } 
-                   else p_acc = 1.0;  
-              h++;
-            }
-        
-          if (!isnan(p_acc)) 
-            {
-              *(x+3*i+j) += xi*delta_x;  // displace positions
+      *(p+3*i+0) = px;
+      *(p+3*i+1) = py;
+      *(p+3*i+2) = pz;
 
-              if (*(x+3*i+j)<0.0) *(x+3*i+j) = (*(x+3*i+j))+dim;
-              if (*(x+3*i+j)>dim) *(x+3*i+j) = (*(x+3*i+j))-dim;
-            }
-        }
+      *(pacc+1) += 1.0/(double)n; 
 
-      // warning: *v = -(dp/pr)*(dV/dpr), similar to the forces!!!
-
-      for (j=0; j<3; j++) 
-        {
-          p_acc = 0.0;
-          p_ran = 1.0;
-          gamma = -(*(v+3*i+j))* delta_p/(2.0*tset);  
-          gamma_exp = exp(gamma);
-          gamma_expi = 1.0/gamma_exp;
-          
-          h=0;
-          while (p_acc < p_ran) 
-            {
-              pi = 2.0*((double)rand()/(double)RAND_MAX)-1.0;
-              p_ran = (double)rand()/(double)RAND_MAX;
-              if (pi<0.0) 
-                {
-                  p_acc = exp(2.0*pi*gamma) * gamma_exp - gamma_expi;
-                  p_acc = p_acc/(gamma_exp - gamma_expi);
-                } 
-              else if (pi>0.0) 
-                     {
-                       p_acc = gamma_exp - exp(2.0*pi*gamma) * gamma_expi;
-                       p_acc = p_acc/(gamma_exp - gamma_expi);
-                     } 
-                   else p_acc = 1.0;  
-              h++;
-            }
-
-          if (!isnan(p_acc)) 
-            {
-             *(p+3*i+j) += pi*delta_p;       // displace momenta
-            }
-        }
+      etot += ec+ep;
     }
 
-  return 1;
+  ep = 0.0;
+
+  pbc[0] = 0.0;
+  pbc[1] = 0.0;
+  pbc[2] = 0.0;
+
+  i = rand()%n;
+
+  cx = (int)(*(x+3*i+0)/rcell);
+  cy = (int)(*(x+3*i+1)/rcell);
+  cz = (int)(*(x+3*i+2)/rcell);
+  //c  = cx*nc*nc+cy*nc+cz;
+
+  delx  = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  dely  = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+  delz  = delta_x*(2.0*((double)rand()/(double)RAND_MAX)-1.0);
+
+  if ((*(x+3*i+0) + delx) < 0.0) pbc[0] = dim;
+  if ((*(x+3*i+0) + delx) > dim) pbc[0] =-dim;
+  if ((*(x+3*i+1) + dely) < 0.0) pbc[1] = dim;
+  if ((*(x+3*i+1) + dely) > dim) pbc[1] =-dim;
+  if ((*(x+3*i+2) + delz) < 0.0) pbc[2] = dim;
+  if ((*(x+3*i+2) + delz) > dim) pbc[2] =-dim;
+
+  for (ccx=cx-1; ccx<=cx+1; ccx++)                 // scan the neighbor cells (including itself)
+    for (ccy=cy-1; ccy<=cy+1; ccy++)
+      for (ccz=cz-1; ccz<=cz+1; ccz++) 
+        {
+          // periodic boundary condition by shifting coordinates
+
+          *(shift+0) = 0.0;
+          *(shift+1) = 0.0;
+          *(shift+2) = 0.0;
+
+          if (ccx<0) *(shift+0) = -dim;
+          else if (ccx>=nc) *(shift+0) = dim;
+
+          if (ccy<0) *(shift+1) = -dim;
+          else if (ccy>=nc) *(shift+1) = dim;
+
+          if (ccz<0) *(shift+2) = -dim;
+          else if (ccz>=nc) *(shift+2) = dim;
+                
+          cc = ((ccx+nc)%nc)*nc*nc+((ccy+nc)%nc)*nc+((ccz+nc)%nc);  
+                 
+          j = head[cc];                        // scan atom j in cell cc
+
+          while (j != EMPTY) 
+             {
+               if (i != j)                       // avoid double counting and correct image positions 
+                 {                            
+                   dx = (*(x+3*i+0)) - (*(x+3*j+0)) - (*(shift+0));
+                   dy = (*(x+3*i+1)) - (*(x+3*j+1)) - (*(shift+1));
+                   dz = (*(x+3*i+2)) - (*(x+3*j+2)) - (*(shift+2));
+                   r2 = dx*dx+dy*dy+dz*dz;
+                          
+                   dpx = (*(p+3*i+0)) - (*(p+3*j+0));
+                   dpy = (*(p+3*i+1)) - (*(p+3*j+1));
+                   dpz = (*(p+3*i+2)) - (*(p+3*j+2));
+                   p2  = dpx*dpx+dpy*dpy+dpz*dpz;
+     
+                   get_table_pandha(ref,ptype,r2,i,j,PANTAB); 
+                   ep -= (*(ref+1)); 
+
+                   get_table_pauli(ref,ptype,r2,p2,'x',i,j,PAUTAB);
+                   ep -= (*(ref+1));
+
+                   dx += delx + pbc[0];
+                   dy += dely + pbc[1];
+                   dz += delz + pbc[2];
+                   r2  = dx*dx+dy*dy+dz*dz;
+
+                   get_table_pandha(ref,ptype,r2,i,j,PANTAB); 
+                   ep += (*(ref+1)); 
+
+                   get_table_pauli(ref,ptype,r2,p2,'x',i,j,PAUTAB);
+                   ep += (*(ref+1));   
+                 }
+               j = lscl[j];
+             } 
+        }
+
+  prob = (double)rand()/(double)RAND_MAX;
+
+  if (prob < exp(-ep/temp))  // accept
+    {
+      *(x+3*i+0) += delx + pbc[0];
+      *(x+3*i+1) += dely + pbc[1];
+      *(x+3*i+2) += delz + pbc[2];
+   
+      *(pacc+0) += 1.0/(double)n;
+
+      etot += ep;
+    }
+
+  return etot/(double)n;
 }
 
 void thermo(double *data,double *v,double *p,double *k,double *e,int n)
 {
   int    i;
-  double vx,vy,vz,px,py,pz;
-  double m2,ec,ep,temp;
+  double velx,vely,velz,vx,vy,vz,px,py,pz;
+  double m2,ec,ep,tkin,temp,tvel;
 
   ec   = 0.0;
   ep   = 0.0;
   m2   = 2.0*M;
+  tkin = 0.0;
   temp = 0.0;
+  tvel = 0.0;
 
 
   for(i=0;i<n;i++) 
@@ -964,27 +901,37 @@ void thermo(double *data,double *v,double *p,double *k,double *e,int n)
       py = *(p+3*i+1);
       pz = *(p+3*i+2);
 
+      velx = *(v+3*i+0);
+      vely = *(v+3*i+1);
+      velz = *(v+3*i+2);
+
       // warning: minus sign is correct!!!
     
-      vx = px/M - (*(v+3*i+0));
-      vy = py/M - (*(v+3*i+1));
-      vz = pz/M - (*(v+3*i+2));
+      vx = px/M - velx;
+      vy = py/M - vely;
+      vz = pz/M - velz;
 
       *(k+i) = (px*px+py*py+pz*pz)/m2;
 
       ec   += (*(k+i));
       ep   += (*(e+i));
-      temp += vx*px + vy*py + vz*pz;  
+      temp += vx*px + vy*py + vz*pz;       // effective temperature
+      tkin += (px*px + py*py + pz*pz)/M;   // kinetic   temperature
+      tvel += M*(vx*vx + vy*vy + vz*vz);   // velocity  temperature
 
     }
 
   ec   = ec/(double)(n);
   temp = temp/(double)(3*n);
+  tkin = tkin/(double)(3*n);
+  tvel = tvel/(double)(3*n);
 
   *(data+0) = temp;
   *(data+1) = ec;
   *(data+2) = ep;
   *(data+3) = ec+ep;
+  *(data+4) = tkin;
+  *(data+5) = tvel;
 
   return;
 }
@@ -1231,12 +1178,10 @@ double read_data(char *myfile,double *x,double *v,double *p,double *f,int *ptype
      j=fscanf(fp,"%f %f %f",&vx,&vy,&vz);
      j=fscanf(fp,"%f %f %f",&px,&py,&pz);
      j=fscanf(fp,"%f %f %f\n",&fx,&fy,&fz);
-
-     // warning: v + p/M is the true velocity!!!
      
-     vpx=((double)vx+(double)px/M)*(double)px;
-     vpy=((double)vy+(double)py/M)*(double)py;
-     vpz=((double)vz+(double)pz/M)*(double)pz;
+     vpx=(double)vx*(double)px;
+     vpy=(double)vy*(double)py;
+     vpz=(double)vz*(double)pz;
      ec+=(vpx+vpy+vpz);
 
     id--;
@@ -1248,9 +1193,9 @@ double read_data(char *myfile,double *x,double *v,double *p,double *f,int *ptype
 
     // warning: minus to follows our own sign rules!!!
     
-    *(v+3*id+0)=-(double)vx;
-    *(v+3*id+1)=-(double)vy;
-    *(v+3*id+2)=-(double)vz;
+    *(v+3*id+0)=px/M-(double)vx;
+    *(v+3*id+1)=py/M-(double)vy;
+    *(v+3*id+2)=pz/M-(double)vz;
 
     *(p+3*id+0)=(double)px;
     *(p+3*id+1)=(double)py;
@@ -1280,19 +1225,24 @@ int write_header(FILE *fp,double dim,int atoms,int timestep)
   fprintf(fp,"%f %f\n",0.0,dim);
   fprintf(fp,"%f %f\n",0.0,dim);
   fprintf(fp,"%f %f\n",0.0,dim);
-  fprintf(fp,"ITEM: ATOMS id type x y z gx gy gz px py pz fx fy fz\n");
+  fprintf(fp,"ITEM: ATOMS id type x y z vx vy vz px py pz fx fy fz\n");
   return 1;
 }
 
 int write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms)
 {
-  int i;
+  int    i;
+  double vx,vy,vz;
 
   for(i=0;i<atoms;i++) 
     {
+      vx = (*(p+3*i+0))/M-(*(v+3*i+0));
+      vy = (*(p+3*i+1))/M-(*(v+3*i+1));
+      vz = (*(p+3*i+2))/M-(*(v+3*i+2));
+
       fprintf(fp,"%d %d",i+1,*(ptype+i));
       fprintf(fp," %f %f %f",*(x+3*i+0),*(x+3*i+1),*(x+3*i+2));
-      fprintf(fp," %f %f %f",-(*(v+3*i+0)),-(*(v+3*i+1)),-(*(v+3*i+2)));
+      fprintf(fp," %f %f %f",vx,vy,vz);
       fprintf(fp," %f %f %f",*(p+3*i+0),*(p+3*i+1),*(p+3*i+2));
       fprintf(fp," %f %f %f",*(f+3*i+0),*(f+3*i+1),*(f+3*i+2));
       fprintf(fp,"\n");

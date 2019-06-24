@@ -1,0 +1,29 @@
+#!/bin/bash
+
+#gcc -Wall -O3 -o pandha_pauli_mc.e pandha_pauli_mc.c -lm 
+
+#gcc -Wall -O3 -o pandha_pauli_mc.e pandha_only_mc.c -lm 
+
+#gcc -Wall -O3 -o check.e check.c -lm 
+
+######### For pandha_pauli_spin_mmc.c -lm ###############
+
+gcc -Wall -O3 -o check.e pandha_pauli_spin_mmc.c -lm 
+
+./check.e -n 1728 -rho 0.16 -temp 4.1 -tend 4.1 -delx 0.5 -delp 10.0 -term 0 -steps 1500 -thsamp 10 -tsamp 1 -ctrl 0.1 -tctrl 10 
+
+
+######### For pandha_pauli_spin_mc.c -lm ###############
+
+#gcc -Wall -O3 -o check.e pandha_pauli_spin_mc.c -lm 
+
+#./check.e -n 1728 -rho 0.16 -temp 4.1 -tend 4.1 -delx 0.5 -delp 10.0 -term 0 -steps 1500 -thsamp 10 -tsamp 0 -ctrl 0.1 -tctrl 0 
+
+#-initial pandha_pauli_mc_initial_n512.lammpstrj 
+
+
+#> pandha_pauli_mc_rho05_delx02_delp7.dat
+
+#mv pandha_pauli_mc.lammpstrj pandha_pauli_mc_rho05_delx02_delp7.lammpstrj
+
+#notify guillermo.frank@gmail.com pandha_pauli_mc.e rho05 delx 02 delp 7 pasos 1000000 terminado
