@@ -85,11 +85,11 @@ int main(int argc, char *argv[])
   char    option[20],myfile[40];
   int     i,n,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
   int     nc,*head,*lscl,*ptype;
-  double  rho,dim,rcell,temp,teff,tend,xproton;
+  double  rho,dim,rcell,temp,teff,tend,dt,xproton;
   double  ekin,epair,etot,delta_x,delta_p,ratio;
   double  *x,*v,*p,*f,*k,*e,*data,pacc[2];
   clock_t c0,c1;
-  //FILE    *fp1;
+  FILE    *fp1;
 
   c0=clock();
   
@@ -175,7 +175,7 @@ int main(int argc, char *argv[])
   else
     {
       ndim=(int)round(cbrt(n));
-      n=ndim*ndim*ndim;    //warning: this is total number of atoms
+      n=ndim*ndim*ndim;                            //warning: this is total number of atoms
 
       ptype = (int *)malloc(n*sizeof(int));
       data = (double *)malloc(10*sizeof(double));  // 10 thermodynamical magnitudes (can be upscaled)
@@ -213,20 +213,55 @@ int main(int argc, char *argv[])
   printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total \tpacc(x)\t\tpacc(p)\n\n");
 
   buildlist(x,head,lscl,rcell,n,nc);
+ 
+  t  = 0;
+
+  if (term>0)
+    {
+      while (t<term)
+        {
+          *(pacc+0) = 0.0;
+          *(pacc+1) = 0.0;
+
+          for (i=0;i<n;i++) 
+            {
+              etot += metropolis(x,p,pacc,head,lscl,ptype,temp,rcell,delta_x,delta_p,dim,n,nc);
+            }
+
+          buildlist(x,head,lscl,rcell,n,nc);  
+
+          if (tctrl>0 && t%tctrl==0) 
+            {
+              if (*(pacc+0) < 0.40) delta_x *= 1.0-ratio;
+              if (*(pacc+0) > 0.60) delta_x *= 1.0+ratio;
+              if (*(pacc+1) < 0.40) delta_p *= 1.0-ratio;
+              if (*(pacc+1) > 0.60) delta_p *= 1.0+ratio; 
+            }
+          t++;
+        }
+    }
+
   computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
 
   thermo(data,v,p,k,e,n);
-
+  
   teff  = *(data+0);
   ekin  = *(data+1);
   epair = *(data+2);
   etot  = *(data+3);
 
-  printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,etot,*(pacc+0),*(pacc+1));
- 
+  t = 0;
+
+  printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,ekin+epair,*(pacc+0),*(pacc+1));
+
+  if(tsamp>0) fp1=fopen("pandha_pauli_mc.lammpstrj","w");
+
+  dt = 0.0;
+  if (tmax) dt = (temp-tend)/(double)(tmax);
+
   t  = 1;
   tmax++;
-
+ 
   while (t<tmax)
     {
       *(pacc+0) = 0.0;
@@ -262,99 +297,19 @@ int main(int argc, char *argv[])
         }
 
 
-
-      t++;
-    }
-
-
-  /*--------------------------------------------------------------------------------------------------
-  if (term)
-    {
-      t=0;
-
-      while (t<term)
-        {
-          
-        }
-
-      delta_x=controldelta(neighbor+0,delta_x,ratio);
-      delta_p=controldelta(neighbor+1,delta_p,ratio); 
-      thermo(data,v,p,k,e,n);
-      teff  = *(data+0);
-
-      if (fabs(temp-teff)>TOLT) printf("thermalisation\t\t\t[not completely thermalized. Reducing step...]\n");
-      else printf("thermalisation\t\t\t[OK]\n");
-
-      t=0;
-
-      while (fabs(temp-teff)>TOLT && t<term)
-        {
-          tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-          computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
-          buildlist(x,head,lscl,rcell,n,nc);
-          thermo(data,v,p,k,e,n);
-
-          teff  = *(data+0);
-          ekin  = *(data+1);
-          epair = *(data+2);
-          etot  = *(data+3);
-          dmin  = *(neighbor+0);
-          pmin  = *(neighbor+1);
-
-          t++;
-        }
-
-
-      if (fabs(temp-teff)>TOLT) printf("\t\t\t\t[temperature out of bound. I suggest to increase 'term']\n\n");
-      else printf("\t\t\t\t[done]\n\n");
-    }
-
-  delta_x=controldelta(neighbor+0,delta_x,ratio);
-  delta_p=controldelta(neighbor+1,delta_p,ratio); 
-
-  if(tsamp>0) fp1=fopen("pandha_pauli_mc.lammpstrj","w");
-
-  printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total \tdelx/dmin \tdelp/pmin\n\n");
-
-  t=0;
-  dt = (temp-tend)/(double)(tmax);
-
-  while (t<tmax)
-    {
-      tfmc(x,v,p,f,delta_x,delta_p,temp,dim,n);
-      computelist(x,v,p,f,e,neighbor,head,lscl,ptype,dim,n,nc);
-      buildlist(x,head,lscl,rcell,n,nc);
-      thermo(data,v,p,k,e,n);
-
-      teff  = *(data+0);
-      ekin  = *(data+1);
-      epair = *(data+2);
-      etot  = *(data+3);
-      dmin  = *(neighbor+0);
-      pmin  = *(neighbor+1);
-
-      if(thsamp>0 && t%thsamp==0) 
-        printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,etot,delta_x/dmin,delta_p/pmin);
-
       if(tsamp>0 && t%tsamp==0)
         {
           write_header(fp1,dim,n,t);
           write_data(fp1,x,v,p,f,ptype,n);
         }
 
-      if (tctrl>0 && t%tctrl==0) 
-        {
-          delta_x=controldelta(neighbor+0,delta_x,ratio);
-          delta_p=controldelta(neighbor+1,delta_p,ratio);
-        }
-
       t++;
       temp -= dt;
     }
 
+  printf("\ndelta_x (final) = %f\ndelta_p (final) = %f\n\n",delta_x,delta_p);
+
   if(tsamp>0) fclose(fp1);
-  
-  ------------------------------------------------------------------------------*/
 
   free(data);
   free(ptype);
