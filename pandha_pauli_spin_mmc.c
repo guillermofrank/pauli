@@ -82,7 +82,7 @@ double  metropolis(double *x,double *p,double *pacc,int *head,int *lscl,int *pty
 
 int main(int argc, char *argv[])
 {
-  char    option[20],myfile[40];
+  char    option[20],myfile[100];
   int     i,n,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
   int     nc,*head,*lscl,*ptype;
   double  rho,dim,rcell,temp,teff,tend,dt,xproton;
