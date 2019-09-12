@@ -19,9 +19,9 @@
 
 // Pandharipande Medium model
 
-#define VR        3088.118 
-#define VA        2666.647
-#define V0        373.118
+#define VR        3088.118 // (original Medium model) 
+#define VA        2666.647 // (original Medium model)
+#define V0        373.118  // (original Medium model) 
 #define MUR       1.7468
 #define MUA       1.6000
 #define MU0       1.5000
@@ -68,13 +68,13 @@ int     write_header(FILE *fp,double dim,int atoms,int timestep);
 int     write_data(FILE *fp,double *x,double *v,double *p,double *f,int *ptype,int atoms);
 
 int     buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc);
-int     computelist(double *x,double *v,double *p,double *f,double *e,int *head,int *lscl,int *ptype,double dim,int n,int nc);
+int     computelist(double *x,double *v,double *p,double *f,double *e,double *epauli,double *epandha,int *head,int *lscl,int *ptype,double dim,int n,int nc);
 void    build_pandha_table(double ri,double rf,int ntable);
 void    build_pauli_table(double ri,double rf,double pi,double pf,int ntable);
 void    get_table_pandha(double *data,int *ptype,double r2,int ii,int jj,int ntable);
 void    get_table_pauli(double *data,int *ptype,double r2,double p2,char flag,int ii,int jj,int ntable);
 int     tfmc(double *x,double *v,double *p,double *f,double delta_x,double delta_p,double tset,double dim,int n);
-void    thermo(double *data,double *v,double *p,double *k,double *e,int n);
+void    thermo(double *data,double *v,double *p,double *k,double *e,double *epauli,double *epandha,int n);
 double  normaldist();
 double  checkperformance1(double temp,double tend,double dim,int tmax,int nc,int n);
 
@@ -82,12 +82,12 @@ double  metropolis(double *x,double *p,double *pacc,int *head,int *lscl,int *pty
 
 int main(int argc, char *argv[])
 {
-  char    option[20],myfile[100];
+  char    option[20],myfile[40];
   int     i,n,ndim,seed,t,term,tmax,thsamp,tsamp,tctrl;
   int     nc,*head,*lscl,*ptype;
   double  rho,dim,rcell,temp,teff,tend,dt,xproton;
-  double  ekin,epair,etot,delta_x,delta_p,ratio;
-  double  *x,*v,*p,*f,*k,*e,*data,pacc[2];
+  double  ekin,epair,etot,epau,epan,delta_x,delta_p,ratio;
+  double  *x,*v,*p,*f,*k,*e,*epauli,*epandha,*data,pacc[2];
   clock_t c0,c1;
   FILE    *fp1;
 
@@ -165,6 +165,9 @@ int main(int argc, char *argv[])
           p = (double *)malloc(3*n*sizeof(double));
           f = (double *)malloc(3*n*sizeof(double));
 
+          epauli  = (double *)malloc(n*sizeof(double)); // Pauli  potential only
+          epandha = (double *)malloc(n*sizeof(double)); // Pandha potential only
+
           teff = read_data(myfile,x,v,p,f,ptype,n);
           term = 0;
           delta_x = DELTAM;
@@ -175,10 +178,10 @@ int main(int argc, char *argv[])
   else
     {
       ndim=(int)round(cbrt(n));
-      n=ndim*ndim*ndim;                            //warning: this is total number of atoms
+      n=ndim*ndim*ndim;                             //warning: this is total number of atoms
 
       ptype = (int *)malloc(n*sizeof(int));
-      data = (double *)malloc(10*sizeof(double));  // 10 thermodynamical magnitudes (can be upscaled)
+      data = (double *)malloc(10*sizeof(double));   // 10 thermodynamical magnitudes (can be upscaled)
 
       k = (double *)malloc(n*sizeof(double));
       e = (double *)malloc(n*sizeof(double));
@@ -186,6 +189,9 @@ int main(int argc, char *argv[])
       v = (double *)malloc(3*n*sizeof(double));
       p = (double *)malloc(3*n*sizeof(double));
       f = (double *)malloc(3*n*sizeof(double));
+
+      epauli  = (double *)malloc(n*sizeof(double)); // Pauli  potential only
+      epandha = (double *)malloc(n*sizeof(double)); // Pandha potential only
 
       dim=inicial(x,v,p,f,ptype,rho,temp,xproton,ndim); 
     }
@@ -210,7 +216,7 @@ int main(int argc, char *argv[])
   head   = (int *)malloc(nc*nc*nc*sizeof(int));
   lscl   = (int *)malloc(n*sizeof(int));
 
-  printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total \tpacc(x)\t\tpacc(p)\n\n");
+  printf("step\ttemp_set\ttemp_eff\te_kinetic\te_potential\te_total  \te_pauli \te_pandha \tpacc(x)\t\tpacc(p)\n\n");
 
   buildlist(x,head,lscl,rcell,n,nc);
  
@@ -241,18 +247,20 @@ int main(int argc, char *argv[])
         }
     }
 
-  computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
+  computelist(x,v,p,f,e,epauli,epandha,head,lscl,ptype,dim,n,nc);
 
-  thermo(data,v,p,k,e,n);
+  thermo(data,v,p,k,e,epauli,epandha,n);
   
   teff  = *(data+0);
   ekin  = *(data+1);
   epair = *(data+2);
   etot  = *(data+3);
+  epau  = *(data+6);
+  epan  = *(data+7);
 
   t = 0;
 
-  printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,ekin+epair,*(pacc+0),*(pacc+1));
+  printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,ekin+epair,epau,epan,*(pacc+0),*(pacc+1));
 
   if(tsamp>0) fp1=fopen("pandha_pauli_mc.lammpstrj","w");
 
@@ -284,16 +292,18 @@ int main(int argc, char *argv[])
 
       if(thsamp>0 && t%thsamp==0) 
         {
-          computelist(x,v,p,f,e,head,lscl,ptype,dim,n,nc);
+          computelist(x,v,p,f,e,epauli,epandha,head,lscl,ptype,dim,n,nc);
 
-          thermo(data,v,p,k,e,n);
+          thermo(data,v,p,k,e,epauli,epandha,n);
  
           teff  = *(data+0);
           ekin  = *(data+1);
           epair = *(data+2);
           //etot  = *(data+3);
+          epau  = *(data+6);
+          epan  = *(data+7);
 
-          printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,ekin+epair,*(pacc+0),*(pacc+1));
+          printf("%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",t,temp,teff,ekin,epair,ekin+epair,epau,epan,*(pacc+0),*(pacc+1));
         }
 
 
@@ -320,6 +330,9 @@ int main(int argc, char *argv[])
   free(v);
   free(p);
   free(f);
+
+  free(epauli);
+  free(epandha);
 
   free(head);
   free(lscl);
@@ -497,16 +510,18 @@ int buildlist(double *x,int *head,int *lscl,double rcell,int n,int nc)
 }
 
 
-int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int *lscl,int *ptype,double dim,int n,int nc)
+int computelist(double *x,double *v,double *p,double *f,double *e,double *epauli,double *epandha,int *head,int *lscl,int *ptype,double dim,int n,int nc)
 {
   int    i,j,c,cx,cy,cz,cc,ccx,ccy,ccz;
   double dx,dy,dz,dpx,dpy,dpz,r,pr,r2,p2;
-  double fx,fy,fz,fr,vx,vy,vz,vr,ep;
+  double fx,fy,fz,fr,vx,vy,vz,vr,ep,epau,epan;
   double shift[3],ref[3];
 
   for (i=0; i<n; i++) 
     {
       *(e+i) = 0.0;
+      *(epauli+i)  = 0.0;
+      *(epandha+i) = 0.0;
       *(f+3*i+0) = 0.0;
       *(f+3*i+1) = 0.0;
       *(f+3*i+2) = 0.0;
@@ -564,9 +579,10 @@ int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int 
 
                               get_table_pandha(ref,ptype,r2,i,j,PANTAB); 
 
-                              r  = *(ref+0); 
-                              ep = *(ref+1); 
-                              fr = *(ref+2);
+                              r    = *(ref+0); 
+                              ep   = *(ref+1); 
+                              epan = *(ref+1);
+                              fr   = *(ref+2);
                               
                               if (r > 0.0)
                                 { 
@@ -574,8 +590,9 @@ int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int 
                                   fy = dy*fr/r;
                                   fz = dz*fr/r;
 
-                                  *(e+i) += ep/(double)n;     
-                                  
+                                  *(e+i)       += ep/(double)n;     
+                                  *(epandha+i) += epan/(double)n; 
+
                                   *(f+3*i+0) += fx;
                                   *(f+3*i+1) += fy;
                                   *(f+3*i+2) += fz;
@@ -586,9 +603,10 @@ int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int 
                               
                               get_table_pauli(ref,ptype,r2,p2,'x',i,j,PAUTAB);
                                  
-                              r  = *(ref+0);
-                              ep = *(ref+1);
-                              fr = *(ref+2);
+                              r    = *(ref+0);
+                              ep   = *(ref+1);
+                              epau = *(ref+1);
+                              fr   = *(ref+2);
 
                               if (r > 0.0)
                                 {     
@@ -598,6 +616,8 @@ int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int 
                                   fz = dz*fr;
 
                                   *(e+i) += ep/(double)n;
+                                  *(epauli+i) += epau/(double)n;
+
                                   *(f+3*i+0) += fx;
                                   *(f+3*i+1) += fy;
                                   *(f+3*i+2) += fz;
@@ -608,9 +628,10 @@ int computelist(double *x,double *v,double *p,double *f,double *e,int *head,int 
 
                               get_table_pauli(ref,ptype,r2,p2,'p',i,j,PAUTAB);
 
-                              pr = *(ref+0);
-                              ep = *(ref+1);
-                              vr = *(ref+2);
+                              pr   = *(ref+0);
+                              ep   = *(ref+1);
+                              epau = *(ref+1);
+                              vr   = *(ref+2);
 
                               if (pr > 0.0)
                                 {            
@@ -836,14 +857,16 @@ double metropolis(double *x,double *p,double *pacc,int *head,int *lscl,int *ptyp
   return etot/(double)n;
 }
 
-void thermo(double *data,double *v,double *p,double *k,double *e,int n)
+void thermo(double *data,double *v,double *p,double *k,double *e,double *epauli,double *epandha,int n)
 {
   int    i;
   double velx,vely,velz,vx,vy,vz,px,py,pz;
-  double m2,ec,ep,tkin,temp,tvel;
+  double m2,ec,ep,epau,epan,tkin,temp,tvel;
 
   ec   = 0.0;
   ep   = 0.0;
+  epau = 0.0;
+  epan = 0.0;
   m2   = 2.0*M;
   tkin = 0.0;
   temp = 0.0;
@@ -870,6 +893,8 @@ void thermo(double *data,double *v,double *p,double *k,double *e,int n)
 
       ec   += (*(k+i));
       ep   += (*(e+i));
+      epau += (*(epauli+i));
+      epan += (*(epandha+i));
       temp += vx*px + vy*py + vz*pz;       // effective temperature
       tkin += (px*px + py*py + pz*pz)/M;   // kinetic   temperature
       tvel += M*(vx*vx + vy*vy + vz*vz);   // velocity  temperature
@@ -887,6 +912,8 @@ void thermo(double *data,double *v,double *p,double *k,double *e,int n)
   *(data+3) = ec+ep;
   *(data+4) = tkin;
   *(data+5) = tvel;
+  *(data+6) = epau;
+  *(data+7) = epan;
 
   return;
 }
